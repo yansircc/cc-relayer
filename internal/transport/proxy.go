@@ -8,7 +8,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/yansir/claude-relay/internal/account"
+	"github.com/yansir/cc-relayer/internal/account"
 	"golang.org/x/net/proxy"
 )
 

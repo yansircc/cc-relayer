@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/yansir/claude-relay/internal/store"
+	"github.com/yansir/cc-relayer/internal/store"
 )
 
 // Bound stainless headers (captured once, replayed always).

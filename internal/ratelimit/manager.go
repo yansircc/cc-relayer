@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yansir/claude-relay/internal/store"
+	"github.com/yansir/cc-relayer/internal/store"
 )
 
 // Manager tracks upstream rate limits from Anthropic response headers.

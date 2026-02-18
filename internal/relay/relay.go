@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yansir/claude-relay/internal/account"
-	"github.com/yansir/claude-relay/internal/auth"
-	"github.com/yansir/claude-relay/internal/config"
-	"github.com/yansir/claude-relay/internal/identity"
-	"github.com/yansir/claude-relay/internal/ratelimit"
-	"github.com/yansir/claude-relay/internal/scheduler"
-	"github.com/yansir/claude-relay/internal/store"
+	"github.com/yansir/cc-relayer/internal/account"
+	"github.com/yansir/cc-relayer/internal/auth"
+	"github.com/yansir/cc-relayer/internal/config"
+	"github.com/yansir/cc-relayer/internal/identity"
+	"github.com/yansir/cc-relayer/internal/ratelimit"
+	"github.com/yansir/cc-relayer/internal/scheduler"
+	"github.com/yansir/cc-relayer/internal/store"
 )
 
 // TransportProvider supplies per-account HTTP clients.

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/yansir/claude-relay/internal/store"
+	"github.com/yansir/cc-relayer/internal/store"
 )
 
 const claudeSalt = "salt"

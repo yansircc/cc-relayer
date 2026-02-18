@@ -4,11 +4,11 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/yansir/claude-relay/internal/account"
-	"github.com/yansir/claude-relay/internal/config"
-	"github.com/yansir/claude-relay/internal/server"
-	"github.com/yansir/claude-relay/internal/store"
-	"github.com/yansir/claude-relay/internal/transport"
+	"github.com/yansir/cc-relayer/internal/account"
+	"github.com/yansir/cc-relayer/internal/config"
+	"github.com/yansir/cc-relayer/internal/server"
+	"github.com/yansir/cc-relayer/internal/store"
+	"github.com/yansir/cc-relayer/internal/transport"
 )
 
 func main() {

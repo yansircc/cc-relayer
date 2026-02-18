@@ -1,6 +1,6 @@
 .PHONY: build run clean test
 
-BINARY=relay-service
+BINARY=cc-relayer
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
 build:

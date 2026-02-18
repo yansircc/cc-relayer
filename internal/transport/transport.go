@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yansir/claude-relay/internal/account"
-	"github.com/yansir/claude-relay/internal/config"
+	"github.com/yansir/cc-relayer/internal/account"
+	"github.com/yansir/cc-relayer/internal/config"
 )
 
 // Manager provides per-account HTTP clients and transports with utls fingerprinting.

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yansir/claude-relay/internal/account"
+	"github.com/yansir/cc-relayer/internal/account"
 )
 
 type poolEntry struct {

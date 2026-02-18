@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/yansir/claude-relay/internal/account"
-	"github.com/yansir/claude-relay/internal/auth"
-	"github.com/yansir/claude-relay/internal/config"
-	"github.com/yansir/claude-relay/internal/store"
+	"github.com/yansir/cc-relayer/internal/account"
+	"github.com/yansir/cc-relayer/internal/auth"
+	"github.com/yansir/cc-relayer/internal/config"
+	"github.com/yansir/cc-relayer/internal/store"
 )
 
 // AdminHandler handles admin API endpoints.

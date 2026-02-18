@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yansir/claude-relay/internal/account"
-	"github.com/yansir/claude-relay/internal/config"
-	"github.com/yansir/claude-relay/internal/store"
+	"github.com/yansir/cc-relayer/internal/account"
+	"github.com/yansir/cc-relayer/internal/config"
+	"github.com/yansir/cc-relayer/internal/store"
 )
 
 // Scheduler selects accounts for requests.

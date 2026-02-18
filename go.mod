@@ -1,4 +1,4 @@
-module github.com/yansir/claude-relay
+module github.com/yansir/cc-relayer
 
 go 1.24.0
 
