@@ -14,35 +14,30 @@ const claudeSalt = "salt"
 
 // Account represents a Claude Official OAuth account.
 type Account struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	Status            string     `json:"status"` // active, created, error, disabled
-	ErrorMessage      string     `json:"errorMessage,omitempty"`
-	Schedulable       bool       `json:"schedulable"`
-	Priority          int        `json:"priority"`
-	MaxConcurrency    int        `json:"maxConcurrency"`
-	AutoStopOnWarning bool       `json:"autoStopOnWarning"`
-	Platform          string     `json:"platform"`
-	AccountType       string     `json:"accountType"` // shared, dedicated
-	LastUsedAt        *time.Time `json:"lastUsedAt,omitempty"`
-	LastRefreshAt     *time.Time `json:"lastRefreshAt,omitempty"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	ExpiresAt         int64      `json:"expiresAt"` // milliseconds
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	Status        string     `json:"status"` // active, created, error, disabled
+	ErrorMessage  string     `json:"errorMessage,omitempty"`
+	Schedulable   bool       `json:"schedulable"`
+	Priority      int        `json:"priority"`
+	LastUsedAt    *time.Time `json:"lastUsedAt,omitempty"`
+	LastRefreshAt *time.Time `json:"lastRefreshAt,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	ExpiresAt     int64      `json:"expiresAt"` // milliseconds
 
 	// Proxy config (JSON stored)
 	Proxy *ProxyConfig `json:"proxy,omitempty"`
 
 	// Rate limit state
-	FiveHourStatus     string     `json:"fiveHourStatus,omitempty"`
-	SessionWindowStart *time.Time `json:"sessionWindowStart,omitempty"`
-	SessionWindowEnd   *time.Time `json:"sessionWindowEnd,omitempty"`
-	FiveHourAutoStopped bool      `json:"fiveHourAutoStopped,omitempty"`
-	OpusRateLimitEndAt *time.Time `json:"opusRateLimitEndAt,omitempty"`
-	OverloadedUntil    *time.Time `json:"overloadedUntil,omitempty"`
+	FiveHourStatus      string     `json:"fiveHourStatus,omitempty"`
+	SessionWindowStart  *time.Time `json:"sessionWindowStart,omitempty"`
+	SessionWindowEnd    *time.Time `json:"sessionWindowEnd,omitempty"`
+	FiveHourAutoStopped bool       `json:"fiveHourAutoStopped,omitempty"`
+	OpusRateLimitEndAt  *time.Time `json:"opusRateLimitEndAt,omitempty"`
+	OverloadedUntil     *time.Time `json:"overloadedUntil,omitempty"`
 
-	// Extra info
-	ExtInfo          map[string]interface{} `json:"extInfo,omitempty"`
-	SubscriptionInfo map[string]interface{} `json:"subscriptionInfo,omitempty"`
+	// Extra info (account_uuid used for identity transform)
+	ExtInfo map[string]interface{} `json:"extInfo,omitempty"`
 }
 
 type ProxyConfig struct {
@@ -64,7 +59,7 @@ func NewAccountStore(s *store.Store, c *Crypto) *AccountStore {
 }
 
 // Create adds a new account. The refreshToken is encrypted before storage.
-func (as *AccountStore) Create(ctx context.Context, name, refreshToken string, proxy *ProxyConfig, priority int, autoStop bool, maxConc int) (*Account, error) {
+func (as *AccountStore) Create(ctx context.Context, name, refreshToken string, proxy *ProxyConfig, priority int) (*Account, error) {
 	id := uuid.New().String()
 
 	encRefresh, err := as.crypto.Encrypt(refreshToken, claudeSalt)
@@ -74,22 +69,18 @@ func (as *AccountStore) Create(ctx context.Context, name, refreshToken string, p
 
 	now := time.Now().UTC()
 	fields := map[string]string{
-		"id":                id,
-		"name":              name,
-		"refreshToken":      encRefresh,
-		"status":            "created",
-		"schedulable":       "true",
-		"priority":          strconv.Itoa(priority),
-		"maxConcurrency":    strconv.Itoa(maxConc),
-		"autoStopOnWarning": strconv.FormatBool(autoStop),
-		"platform":          "claude",
-		"accountType":       "shared",
-		"createdAt":         now.Format(time.RFC3339),
-		"lastUsedAt":        "",
-		"lastRefreshAt":     "",
-		"expiresAt":         "0",
-		"errorMessage":      "",
-		"fiveHourStatus":    "",
+		"id":             id,
+		"name":           name,
+		"refreshToken":   encRefresh,
+		"status":         "created",
+		"schedulable":    "true",
+		"priority":       strconv.Itoa(priority),
+		"createdAt":      now.Format(time.RFC3339),
+		"lastUsedAt":     "",
+		"lastRefreshAt":  "",
+		"expiresAt":      "0",
+		"errorMessage":   "",
+		"fiveHourStatus": "",
 	}
 
 	if proxy != nil {
@@ -102,17 +93,13 @@ func (as *AccountStore) Create(ctx context.Context, name, refreshToken string, p
 	}
 
 	return &Account{
-		ID:                id,
-		Name:              name,
-		Status:            "created",
-		Schedulable:       true,
-		Priority:          priority,
-		MaxConcurrency:    maxConc,
-		AutoStopOnWarning: autoStop,
-		Platform:          "claude",
-		AccountType:       "shared",
-		CreatedAt:         now,
-		Proxy:             proxy,
+		ID:          id,
+		Name:        name,
+		Status:      "created",
+		Schedulable: true,
+		Priority:    priority,
+		CreatedAt:   now,
+		Proxy:       proxy,
 	}, nil
 }
 
@@ -212,18 +199,14 @@ func (as *AccountStore) StoreTokens(ctx context.Context, id, accessToken, refres
 // fromMap converts a Redis hash map to an Account struct.
 func (as *AccountStore) fromMap(m map[string]string) *Account {
 	a := &Account{
-		ID:                m["id"],
-		Name:              m["name"],
-		Status:            m["status"],
-		ErrorMessage:      m["errorMessage"],
-		Schedulable:       m["schedulable"] == "true",
-		Priority:          atoi(m["priority"], 50),
-		MaxConcurrency:    atoi(m["maxConcurrency"], 0),
-		AutoStopOnWarning: m["autoStopOnWarning"] == "true",
-		Platform:          m["platform"],
-		AccountType:       m["accountType"],
-		ExpiresAt:         atoi64(m["expiresAt"], 0),
-		FiveHourStatus:     m["fiveHourStatus"],
+		ID:                  m["id"],
+		Name:                m["name"],
+		Status:              m["status"],
+		ErrorMessage:        m["errorMessage"],
+		Schedulable:         m["schedulable"] == "true",
+		Priority:            atoi(m["priority"], 50),
+		ExpiresAt:           atoi64(m["expiresAt"], 0),
+		FiveHourStatus:      m["fiveHourStatus"],
 		FiveHourAutoStopped: m["fiveHourAutoStopped"] == "true",
 	}
 
@@ -260,13 +243,6 @@ func (as *AccountStore) fromMap(m map[string]string) *Account {
 		var ext map[string]interface{}
 		if json.Unmarshal([]byte(extStr), &ext) == nil {
 			a.ExtInfo = ext
-		}
-	}
-
-	if subStr := m["subscriptionInfo"]; subStr != "" {
-		var sub map[string]interface{}
-		if json.Unmarshal([]byte(subStr), &sub) == nil {
-			a.SubscriptionInfo = sub
 		}
 	}
 

@@ -4,15 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strings"
 )
 
-// routeTagPattern strips internal route tags like [relay/claude] from error messages.
-var routeTagPattern = regexp.MustCompile(`\[relay/[^\]]+\]\s*`)
-
-// ErrorCode defines a standardised error response.
-type ErrorCode struct {
-	Code    string
+// errorCode defines a standardised error response.
+type errorCode struct {
 	Status  int
 	Type    string
 	Message string
@@ -20,51 +15,46 @@ type ErrorCode struct {
 }
 
 // Predefined error codes.
-var errorCodes = []ErrorCode{
-	{Code: "E001", Status: 400, Type: "invalid_request_error", Message: "bad request format", Pattern: regexp.MustCompile(`(?i)invalid.?request|bad request|malformed`)},
-	{Code: "E002", Status: 401, Type: "authentication_error", Message: "authentication failed", Pattern: regexp.MustCompile(`(?i)unauthorized|invalid.*key|auth.*fail|invalid.*token`)},
-	{Code: "E003", Status: 403, Type: "permission_error", Message: "access denied", Pattern: regexp.MustCompile(`(?i)forbidden|permission|access.?denied`)},
-	{Code: "E004", Status: 404, Type: "not_found_error", Message: "resource not found", Pattern: regexp.MustCompile(`(?i)not.?found`)},
-	{Code: "E005", Status: 413, Type: "request_too_large", Message: "request payload too large", Pattern: regexp.MustCompile(`(?i)too.?large|payload|content.?length`)},
-	{Code: "E006", Status: 429, Type: "rate_limit_error", Message: "rate limited, please retry later", Pattern: regexp.MustCompile(`(?i)rate.?limit|too.?many|throttl`)},
-	{Code: "E007", Status: 500, Type: "api_error", Message: "internal server error", Pattern: regexp.MustCompile(`(?i)internal.?server`)},
-	{Code: "E008", Status: 502, Type: "api_error", Message: "bad gateway", Pattern: regexp.MustCompile(`(?i)bad.?gateway`)},
-	{Code: "E009", Status: 503, Type: "overloaded_error", Message: "service temporarily overloaded", Pattern: regexp.MustCompile(`(?i)overloaded|unavailable`)},
-	{Code: "E010", Status: 529, Type: "overloaded_error", Message: "API overloaded, please retry later", Pattern: regexp.MustCompile(`(?i)529|overloaded`)},
-	{Code: "E011", Status: 400, Type: "invalid_request_error", Message: "model not available", Pattern: regexp.MustCompile(`(?i)model.*not.*available|unsupported.*model|does not support`)},
-	{Code: "E012", Status: 400, Type: "invalid_request_error", Message: "context window exceeded", Pattern: regexp.MustCompile(`(?i)context.?window|token.?limit.*exceed|too.?long|max.*tokens.*input`)},
-	{Code: "E013", Status: 400, Type: "invalid_request_error", Message: "output token limit exceeded", Pattern: regexp.MustCompile(`(?i)max.*output|output.*token.*limit`)},
-	{Code: "E014", Status: 400, Type: "invalid_request_error", Message: "content policy violation", Pattern: regexp.MustCompile(`(?i)content.?policy|safety|moderation|harmful`)},
-	{Code: "E015", Status: 500, Type: "api_error", Message: "unexpected upstream error", Pattern: nil},
+var errorCodes = []errorCode{
+	{Status: 400, Type: "invalid_request_error", Message: "bad request format", Pattern: regexp.MustCompile(`(?i)invalid.?request|bad request|malformed`)},
+	{Status: 401, Type: "authentication_error", Message: "authentication failed", Pattern: regexp.MustCompile(`(?i)unauthorized|invalid.*key|auth.*fail|invalid.*token`)},
+	{Status: 403, Type: "permission_error", Message: "access denied", Pattern: regexp.MustCompile(`(?i)forbidden|permission|access.?denied`)},
+	{Status: 404, Type: "not_found_error", Message: "resource not found", Pattern: regexp.MustCompile(`(?i)not.?found`)},
+	{Status: 413, Type: "request_too_large", Message: "request payload too large", Pattern: regexp.MustCompile(`(?i)too.?large|payload|content.?length`)},
+	{Status: 429, Type: "rate_limit_error", Message: "rate limited, please retry later", Pattern: regexp.MustCompile(`(?i)rate.?limit|too.?many|throttl`)},
+	{Status: 500, Type: "api_error", Message: "internal server error", Pattern: regexp.MustCompile(`(?i)internal.?server`)},
+	{Status: 502, Type: "api_error", Message: "bad gateway", Pattern: regexp.MustCompile(`(?i)bad.?gateway`)},
+	{Status: 503, Type: "overloaded_error", Message: "service temporarily overloaded", Pattern: regexp.MustCompile(`(?i)overloaded|unavailable`)},
+	{Status: 529, Type: "overloaded_error", Message: "API overloaded, please retry later", Pattern: regexp.MustCompile(`(?i)529|overloaded`)},
+	{Status: 400, Type: "invalid_request_error", Message: "model not available", Pattern: regexp.MustCompile(`(?i)model.*not.*available|unsupported.*model|does not support`)},
+	{Status: 400, Type: "invalid_request_error", Message: "context window exceeded", Pattern: regexp.MustCompile(`(?i)context.?window|token.?limit.*exceed|too.?long|max.*tokens.*input`)},
+	{Status: 400, Type: "invalid_request_error", Message: "output token limit exceeded", Pattern: regexp.MustCompile(`(?i)max.*output|output.*token.*limit`)},
+	{Status: 400, Type: "invalid_request_error", Message: "content policy violation", Pattern: regexp.MustCompile(`(?i)content.?policy|safety|moderation|harmful`)},
+	{Status: 500, Type: "api_error", Message: "unexpected upstream error", Pattern: nil},
 }
 
-// statusCodeMap maps HTTP status codes to their primary error code.
-var statusCodeMap = map[int]*ErrorCode{}
+// statusCodeMap maps HTTP status codes to their primary error code (1:1 statuses only).
+var statusCodeMap map[int]*errorCode
 
 func init() {
-	// Build status-based lookup for codes that map 1:1 to HTTP status.
-	directMap := map[int]string{
-		401: "E002",
-		403: "E003",
-		404: "E004",
-		413: "E005",
-		429: "E006",
-		502: "E008",
-		503: "E009",
-		529: "E010",
+	directStatuses := map[int]bool{
+		401: true, 403: true, 404: true, 413: true,
+		429: true, 502: true, 503: true, 529: true,
 	}
-	for _, ec := range errorCodes {
-		if code, ok := directMap[ec.Status]; ok && ec.Code == code {
-			cp := ec
-			statusCodeMap[ec.Status] = &cp
+	statusCodeMap = make(map[int]*errorCode, len(directStatuses))
+	for i := range errorCodes {
+		if directStatuses[errorCodes[i].Status] && statusCodeMap[errorCodes[i].Status] == nil {
+			statusCodeMap[errorCodes[i].Status] = &errorCodes[i]
 		}
 	}
 }
 
+// fallbackError is the last entry in errorCodes (unexpected upstream error).
+var fallbackError = &errorCodes[len(errorCodes)-1]
+
 // SanitizeError maps an upstream error response to a sanitised client-facing error.
-// It strips internal route tags and attempts to match known error patterns.
 func SanitizeError(statusCode int, body []byte) (int, []byte) {
-	bodyStr := stripRouteTags(string(body))
+	bodyStr := string(body)
 
 	// Try direct status code mapping first
 	if ec, ok := statusCodeMap[statusCode]; ok {
@@ -86,24 +76,17 @@ func SanitizeError(statusCode int, body []byte) (int, []byte) {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if json.Unmarshal([]byte(bodyStr), &parsed) == nil && parsed.Error.Type != "" {
-		msg := stripRouteTags(parsed.Error.Message)
-		return statusCode, buildErrorJSON(parsed.Error.Type, msg)
+	if json.Unmarshal(body, &parsed) == nil && parsed.Error.Type != "" {
+		return statusCode, buildErrorJSON(parsed.Error.Type, parsed.Error.Message)
 	}
 
-	// Fallback to E015
-	e015 := errorCodes[len(errorCodes)-1]
-	return e015.Status, buildErrorJSON(e015.Type, e015.Message)
+	return fallbackError.Status, buildErrorJSON(fallbackError.Type, fallbackError.Message)
 }
 
 // SanitizeSSEError wraps a sanitised error as an SSE event.
 func SanitizeSSEError(statusCode int, body []byte) string {
 	_, sanitized := SanitizeError(statusCode, body)
 	return fmt.Sprintf("event: error\ndata: %s\n\n", sanitized)
-}
-
-func stripRouteTags(s string) string {
-	return strings.TrimSpace(routeTagPattern.ReplaceAllString(s, ""))
 }
 
 func buildErrorJSON(errType, msg string) []byte {
