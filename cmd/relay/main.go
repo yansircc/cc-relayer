@@ -11,6 +11,8 @@ import (
 	"github.com/yansir/cc-relayer/internal/transport"
 )
 
+var version = "dev"
+
 func main() {
 	// Load configuration
 	cfg := config.Load()
@@ -30,6 +32,7 @@ func main() {
 		level = slog.LevelError
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	slog.Info("cc-relayer starting", "version", version)
 
 	// Connect to Redis
 	s, err := store.New(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
