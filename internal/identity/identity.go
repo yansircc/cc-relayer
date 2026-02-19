@@ -15,7 +15,130 @@ import (
 	"github.com/yansir/cc-relayer/internal/store"
 )
 
-// billingHeaderPattern matches x-anthropic-billing-header entries in system prompts.
+// --- Header filtering ---
+
+// StainlessPrefix identifies x-stainless-* headers.
+const StainlessPrefix = "x-stainless-"
+
+var allowedHeaders = map[string]bool{
+	"accept":            true,
+	"content-type":      true,
+	"user-agent":        true,
+	"anthropic-version": true,
+	"anthropic-beta":    true,
+	"x-api-key":         true,
+	"authorization":     true,
+	"x-app":             true,
+}
+
+// FilterHeaders builds a clean header set with only allowed headers.
+// Stainless headers are handled separately (via fingerprint binding).
+func FilterHeaders(original http.Header) http.Header {
+	clean := make(http.Header)
+
+	for key, vals := range original {
+		lower := strings.ToLower(key)
+
+		if allowedHeaders[lower] || strings.HasPrefix(lower, StainlessPrefix) {
+			for _, v := range vals {
+				clean.Add(key, v)
+			}
+		}
+	}
+
+	return clean
+}
+
+// SetRequiredHeaders sets the required headers for the upstream request.
+// The model parameter is used to filter beta flags for non-CC models (e.g. Haiku).
+func SetRequiredHeaders(h http.Header, accessToken, apiVersion, betaHeader, userAgent, model string) {
+	beta := betaHeader
+	if strings.Contains(strings.ToLower(model), "haiku") {
+		beta = filterBetaForHaiku(betaHeader)
+	}
+
+	h.Set("Authorization", "Bearer "+accessToken)
+	h.Set("anthropic-version", apiVersion)
+	h.Set("anthropic-beta", beta)
+	h.Set("Content-Type", "application/json")
+	if userAgent != "" {
+		h.Set("User-Agent", userAgent)
+	}
+}
+
+func filterBetaForHaiku(betaHeader string) string {
+	parts := strings.Split(betaHeader, ",")
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		p := strings.TrimSpace(part)
+		if strings.HasPrefix(p, "claude-code-") || strings.HasPrefix(p, "fine-grained-tool-streaming-") {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return strings.Join(filtered, ",")
+}
+
+// --- User ID rewriting ---
+
+var userIDPattern = regexp.MustCompile(`^user_([a-fA-F0-9]{64})_account__session_([\w-]+)$`)
+var sessionUUIDPattern = regexp.MustCompile(`session_([a-f0-9-]{36})$`)
+
+// RewriteUserID replaces the user_id to match the account's real identity
+// while maintaining session consistency.
+func RewriteUserID(originalUserID, accountID, accountUUID string) string {
+	matches := userIDPattern.FindStringSubmatch(originalUserID)
+	if len(matches) < 3 {
+		return buildUserID(accountID, accountUUID, "default")
+	}
+	return buildUserID(accountID, accountUUID, matches[2])
+}
+
+// ExtractSessionUUID extracts the session UUID from a user_id string.
+func ExtractSessionUUID(userID string) string {
+	matches := sessionUUIDPattern.FindStringSubmatch(userID)
+	if len(matches) < 2 {
+		return ""
+	}
+	return matches[1]
+}
+
+// GetAccountUUID extracts account_uuid from the account's extInfo.
+func GetAccountUUID(extInfo map[string]interface{}) string {
+	if extInfo == nil {
+		return ""
+	}
+	if v, ok := extInfo["account_uuid"]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func buildUserID(accountID, accountUUID, sessionTail string) string {
+	accountHash := deriveAccountHash(accountUUID, accountID)
+	stableSession := deriveSessionUUID(accountID, sessionTail)
+	return fmt.Sprintf("user_%s_account__session_%s", accountHash, stableSession)
+}
+
+func deriveAccountHash(accountUUID, accountID string) string {
+	source := accountUUID
+	if source == "" {
+		source = accountID
+	}
+	h := sha256.Sum256([]byte(source))
+	return hex.EncodeToString(h[:])
+}
+
+func deriveSessionUUID(accountID, sessionTail string) string {
+	h := sha256.Sum256([]byte(accountID + ":" + sessionTail))
+	hx := hex.EncodeToString(h[:16])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", hx[0:8], hx[8:12], hx[12:16], hx[16:20], hx[20:32])
+}
+
+// --- Transformer ---
+
 var billingHeaderPattern = regexp.MustCompile(`(?i)x-anthropic-billing-header`)
 
 // Transformer applies all identity transformations to a request.
@@ -50,7 +173,7 @@ func (t *Transformer) Transform(
 	// 1. Strip billing headers from system prompt
 	t.stripBillingHeaders(body)
 
-	// 2. Enforce cache_control compliance (max 4 blocks, strip TTL)
+	// 2. Enforce cache_control compliance (max N blocks, strip TTL)
 	t.enforceCacheControl(body)
 
 	// 3. Rewrite metadata.user_id
@@ -65,13 +188,11 @@ func (t *Transformer) Transform(
 	result.SessionHash = t.computeSessionHashFromBody(body)
 
 	// 5. Bind/restore stainless headers
-	RemoveAllStainless(result.Headers) // Clear client's stainless first
+	RemoveAllStainless(result.Headers)
 	BindStainlessHeaders(ctx, t.store, acct.ID, reqHeaders, result.Headers)
 
 	return result
 }
-
-// --- Internal methods ---
 
 func (t *Transformer) stripBillingHeaders(body map[string]interface{}) {
 	system, ok := body["system"]
@@ -86,7 +207,7 @@ func (t *Transformer) stripBillingHeaders(body map[string]interface{}) {
 			if m, ok := entry.(map[string]interface{}); ok {
 				if text, ok := m["text"].(string); ok {
 					if billingHeaderPattern.MatchString(text) {
-						continue // Strip billing header entries
+						continue
 					}
 				}
 			}
@@ -99,7 +220,6 @@ func (t *Transformer) stripBillingHeaders(body map[string]interface{}) {
 func (t *Transformer) enforceCacheControl(body map[string]interface{}) {
 	maxBlocks := t.cfg.MaxCacheControls
 
-	// Strip TTL from all cache_control entries and count them
 	total := 0
 	total += stripAndCountCacheControl(body, "system")
 	total += stripAndCountCacheControl(body, "messages")
@@ -108,7 +228,6 @@ func (t *Transformer) enforceCacheControl(body map[string]interface{}) {
 		return
 	}
 
-	// Remove excess: from messages first, then system
 	excess := total - maxBlocks
 	excess = removeCacheControls(body, "messages", excess)
 	if excess > 0 {
@@ -121,7 +240,6 @@ func stripAndCountCacheControl(body map[string]interface{}, field string) int {
 	walkContentBlocks(body[field], func(block map[string]interface{}) {
 		if cc, ok := block["cache_control"]; ok {
 			count++
-			// Strip TTL if present
 			if ccMap, ok := cc.(map[string]interface{}); ok {
 				delete(ccMap, "ttl")
 			}
@@ -153,7 +271,6 @@ func walkContentBlocks(v interface{}, fn func(map[string]interface{})) {
 		for _, item := range s {
 			if m, ok := item.(map[string]interface{}); ok {
 				fn(m)
-				// Recurse into content arrays
 				if content, ok := m["content"]; ok {
 					walkContentBlocks(content, fn)
 				}
@@ -185,19 +302,43 @@ func (t *Transformer) computeSessionHashFromBody(body map[string]interface{}) st
 		}
 	}
 
-	return computeSessionHashInline(userID, systemPrompt, firstMsg)
+	return computeSessionHash(userID, systemPrompt, firstMsg)
 }
+
+func computeSessionHash(userID, systemPrompt, firstMessage string) string {
+	if idx := strings.LastIndex(userID, "session_"); idx >= 0 {
+		session := userID[idx:]
+		h := sha256.Sum256([]byte("session:" + session))
+		return hex.EncodeToString(h[:16])
+	}
+	if systemPrompt != "" {
+		end := len(systemPrompt)
+		if end > 200 {
+			end = 200
+		}
+		h := sha256.Sum256([]byte("system:" + systemPrompt[:end]))
+		return hex.EncodeToString(h[:16])
+	}
+	if firstMessage != "" {
+		end := len(firstMessage)
+		if end > 200 {
+			end = 200
+		}
+		h := sha256.Sum256([]byte("msg:" + firstMessage[:end]))
+		return hex.EncodeToString(h[:16])
+	}
+	return ""
+}
+
+// --- Warmup detection ---
 
 // IsWarmupRequest checks if the request is a warmup/non-productive request.
 func IsWarmupRequest(body map[string]interface{}) bool {
-	// Check for warmup ping
 	if messages, ok := body["messages"].([]interface{}); ok && len(messages) == 1 {
 		if m, ok := messages[0].(map[string]interface{}); ok {
-			// String content: "Warmup"
 			if content, ok := m["content"].(string); ok && content == "Warmup" {
 				return true
 			}
-			// Array content: [{"type":"text","text":"Warmup"}]
 			if content, ok := m["content"].([]interface{}); ok && len(content) == 1 {
 				if block, ok := content[0].(map[string]interface{}); ok {
 					if text, ok := block["text"].(string); ok && text == "Warmup" {
@@ -208,7 +349,6 @@ func IsWarmupRequest(body map[string]interface{}) bool {
 		}
 	}
 
-	// Check system prompt for title/analysis patterns
 	systemText := extractSystemText(body)
 	if strings.Contains(systemText, "Please write a 5-10 word title") {
 		return true
@@ -254,29 +394,4 @@ func WarmupEvents(model string) []string {
 func generateShortID() string {
 	h := sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
 	return hex.EncodeToString(h[:8])
-}
-
-func computeSessionHashInline(userID, systemPrompt, firstMessage string) string {
-	if idx := strings.LastIndex(userID, "session_"); idx >= 0 {
-		session := userID[idx:]
-		h := sha256.Sum256([]byte("session:" + session))
-		return hex.EncodeToString(h[:16])
-	}
-	if systemPrompt != "" {
-		end := len(systemPrompt)
-		if end > 200 {
-			end = 200
-		}
-		h := sha256.Sum256([]byte("system:" + systemPrompt[:end]))
-		return hex.EncodeToString(h[:16])
-	}
-	if firstMessage != "" {
-		end := len(firstMessage)
-		if end > 200 {
-			end = 200
-		}
-		h := sha256.Sum256([]byte("msg:" + firstMessage[:end]))
-		return hex.EncodeToString(h[:16])
-	}
-	return ""
 }
