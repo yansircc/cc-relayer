@@ -83,5 +83,5 @@ func GetKeyInfo(ctx context.Context) *KeyInfo {
 func writeError(w http.ResponseWriter, status int, errType, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"error":{"type":"%s","message":"%s"}}`, errType, msg)
+	fmt.Fprintf(w, `{"type":"error","error":{"type":"%s","message":"%s"}}`, errType, msg)
 }

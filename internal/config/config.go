@@ -36,6 +36,7 @@ type Config struct {
 	// Error pause durations
 	ErrorPause401 time.Duration
 	ErrorPause403 time.Duration
+	ErrorPause429 time.Duration
 	ErrorPause529 time.Duration
 
 	// Request
@@ -72,6 +73,7 @@ func Load() *Config {
 
 		ErrorPause401: envDuration("ERROR_PAUSE_401", 30*time.Minute),
 		ErrorPause403: envDuration("ERROR_PAUSE_403", 10*time.Minute),
+		ErrorPause429: envDuration("ERROR_PAUSE_429", 60*time.Second),
 		ErrorPause529: envDuration("ERROR_PAUSE_529", 5*time.Minute),
 
 		RequestTimeout:   envDuration("REQUEST_TIMEOUT", 5*time.Minute),

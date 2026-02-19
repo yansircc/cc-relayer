@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,9 +74,17 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Enforce request body size limit
+	req.Body = http.MaxBytesReader(w, req.Body, int64(r.cfg.MaxRequestBodyMB)<<20)
+
 	// Parse request body
 	body, rawBody, err := parseBody(req)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds size limit")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON body")
 		return
 	}
@@ -336,7 +346,23 @@ func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, 
 
 	case 429:
 		r.rateLimit.CaptureHeaders(ctx, acct.ID, resp.Header)
-		// Mark Opus-specific rate limit from reset header
+
+		// Determine cooldown: Retry-After header > unified-reset header > config default
+		until := time.Now().Add(r.cfg.ErrorPause429)
+		if retryAfter := parseRetryAfter(resp.Header.Get("Retry-After")); retryAfter > 0 {
+			until = time.Now().Add(retryAfter)
+		} else if resetStr := resp.Header.Get("anthropic-ratelimit-unified-reset"); resetStr != "" {
+			if resetTime, err := time.Parse(time.RFC3339, resetStr); err == nil {
+				until = resetTime
+			}
+		}
+
+		_ = r.accounts.Update(ctx, acct.ID, map[string]string{
+			"overloadedAt":    time.Now().UTC().Format(time.RFC3339),
+			"overloadedUntil": until.UTC().Format(time.RFC3339),
+		})
+
+		// Mark Opus-specific rate limit (separate from general cooldown)
 		if isOpus {
 			if resetStr := resp.Header.Get("anthropic-ratelimit-unified-reset"); resetStr != "" {
 				if resetTime, err := time.Parse(time.RFC3339, resetStr); err == nil {
@@ -344,7 +370,7 @@ func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, 
 				}
 			}
 		}
-		slog.Warn("account rate limited (429)", "accountId", acct.ID)
+		slog.Warn("account rate limited (429)", "accountId", acct.ID, "until", until.UTC())
 
 	case 403:
 		bodyStr := string(errBody)
@@ -452,6 +478,25 @@ func isOldSession(body map[string]interface{}) bool {
 	}
 
 	return false
+}
+
+// parseRetryAfter parses a Retry-After header value.
+// Supports seconds ("60") and HTTP-date ("Wed, 19 Feb 2026 05:30:00 GMT").
+func parseRetryAfter(value string) time.Duration {
+	if value == "" {
+		return 0
+	}
+	// Try as seconds first
+	if secs, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	// Try as HTTP-date
+	if t, err := time.Parse(time.RFC1123, value); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 func truncate(s string, maxLen int) string {
