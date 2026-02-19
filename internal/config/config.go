@@ -18,19 +18,12 @@ type Config struct {
 
 	// Security
 	EncryptionKey string
-	JWTSecret     string
-	APIKeyPrefix  string
-
-	// Admin
-	AdminUsername string
-	AdminPassword string
+	StaticToken   string
 
 	// Claude API
 	ClaudeAPIURL     string
 	ClaudeAPIVersion string
 	ClaudeBetaHeader string
-	OAuthClientID    string
-	OAuthTokenURL    string
 
 	// Proxy
 	DefaultProxyTimeout time.Duration
@@ -38,17 +31,18 @@ type Config struct {
 	// Scheduling
 	StickySessionTTL    time.Duration
 	SessionBindingTTL   time.Duration
-	OverloadedCooldown  time.Duration
 	TokenRefreshAdvance time.Duration
 
-	// Rate limiting
-	ConcurrencySlotTTL time.Duration
+	// Error pause durations
+	ErrorPause401 time.Duration
+	ErrorPause403 time.Duration
+	ErrorPause529 time.Duration
 
 	// Request
-	RequestTimeout    time.Duration
-	MaxRequestBodyMB  int
-	MaxRetryAccounts  int
-	MaxCacheControls  int
+	RequestTimeout   time.Duration
+	MaxRequestBodyMB int
+	MaxRetryAccounts int
+	MaxCacheControls int
 
 	// Logging
 	LogLevel string
@@ -64,26 +58,21 @@ func Load() *Config {
 		RedisDB:       envInt("REDIS_DB", 0),
 
 		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
-		JWTSecret:     os.Getenv("JWT_SECRET"),
-		APIKeyPrefix:  envOr("API_KEY_PREFIX", "cr_"),
-
-		AdminUsername: envOr("ADMIN_USERNAME", "admin"),
-		AdminPassword: os.Getenv("ADMIN_PASSWORD"),
+		StaticToken:   os.Getenv("API_TOKEN"),
 
 		ClaudeAPIURL:     envOr("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
 		ClaudeAPIVersion: envOr("CLAUDE_API_VERSION", "2023-06-01"),
 		ClaudeBetaHeader: envOr("CLAUDE_BETA_HEADER", "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"),
-		OAuthClientID:    envOr("OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
-		OAuthTokenURL:    envOr("OAUTH_TOKEN_URL", "https://console.anthropic.com/v1/oauth/token"),
 
 		DefaultProxyTimeout: envDuration("DEFAULT_PROXY_TIMEOUT", 60*time.Second),
 
 		StickySessionTTL:    envDuration("STICKY_SESSION_TTL", time.Hour),
 		SessionBindingTTL:   envDuration("SESSION_BINDING_TTL", 24*time.Hour),
-		OverloadedCooldown:  envDuration("OVERLOADED_COOLDOWN", 5*time.Minute),
 		TokenRefreshAdvance: envDuration("TOKEN_REFRESH_ADVANCE", 60*time.Second),
 
-		ConcurrencySlotTTL: envDuration("CONCURRENCY_SLOT_TTL", 300*time.Second),
+		ErrorPause401: envDuration("ERROR_PAUSE_401", 30*time.Minute),
+		ErrorPause403: envDuration("ERROR_PAUSE_403", 10*time.Minute),
+		ErrorPause529: envDuration("ERROR_PAUSE_529", 5*time.Minute),
 
 		RequestTimeout:   envDuration("REQUEST_TIMEOUT", 5*time.Minute),
 		MaxRequestBodyMB: envInt("REQUEST_MAX_SIZE_MB", 60),
@@ -98,11 +87,8 @@ func (c *Config) Validate() error {
 	if c.EncryptionKey == "" {
 		return errMissing("ENCRYPTION_KEY")
 	}
-	if c.JWTSecret == "" {
-		return errMissing("JWT_SECRET")
-	}
-	if c.AdminPassword == "" {
-		return errMissing("ADMIN_PASSWORD")
+	if c.StaticToken == "" {
+		return errMissing("API_TOKEN")
 	}
 	return nil
 }

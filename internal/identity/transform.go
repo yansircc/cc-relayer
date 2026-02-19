@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -21,22 +20,19 @@ var billingHeaderPattern = regexp.MustCompile(`(?i)x-anthropic-billing-header`)
 
 // Transformer applies all identity transformations to a request.
 type Transformer struct {
-	store     *store.Store
-	sigCache  *SignatureCache
-	cfg       *config.Config
+	store *store.Store
+	cfg   *config.Config
 }
 
-func NewTransformer(s *store.Store, sc *SignatureCache, cfg *config.Config) *Transformer {
-	return &Transformer{store: s, sigCache: sc, cfg: cfg}
+func NewTransformer(s *store.Store, cfg *config.Config) *Transformer {
+	return &Transformer{store: s, cfg: cfg}
 }
 
 // TransformResult holds the results of a transformation.
 type TransformResult struct {
-	Body          map[string]interface{}
-	Headers       http.Header
-	SessionHash   string
-	IsRealCC      bool
-	ToolNameMap   map[string]string // transformed → original (for response restoration)
+	Body        map[string]interface{}
+	Headers     http.Header
+	SessionHash string
 }
 
 // Transform applies all identity transformations to a request.
@@ -57,15 +53,7 @@ func (t *Transformer) Transform(
 	// 2. Enforce cache_control compliance (max 4 blocks, strip TTL)
 	t.enforceCacheControl(body)
 
-	// 3. Check if real Claude Code request
-	result.IsRealCC = IsClaudeCodeRequest(body["system"])
-
-	// 4. Inject system prompt if not real CC
-	if !result.IsRealCC {
-		body["system"] = InjectClaudeCodePrompt(body["system"])
-	}
-
-	// 5. Rewrite metadata.user_id
+	// 3. Rewrite metadata.user_id
 	accountUUID := GetAccountUUID(acct.ExtInfo)
 	if metadata, ok := body["metadata"].(map[string]interface{}); ok {
 		if origUserID, ok := metadata["user_id"].(string); ok {
@@ -73,54 +61,14 @@ func (t *Transformer) Transform(
 		}
 	}
 
-	// 6. Compute session hash
+	// 4. Compute session hash
 	result.SessionHash = t.computeSessionHashFromBody(body)
 
-	// 7. Bind/restore stainless headers
+	// 5. Bind/restore stainless headers
 	RemoveAllStainless(result.Headers) // Clear client's stainless first
 	BindStainlessHeaders(ctx, t.store, acct.ID, reqHeaders, result.Headers)
 
-	// 8. Restore thinking signatures
-	t.restoreSignatures(body, acct.ID)
-
-	// 9. Tool name normalization (non-CC only)
-	if !result.IsRealCC {
-		result.ToolNameMap = t.normalizeToolNames(body)
-	}
-
 	return result
-}
-
-// RestoreToolNamesInResponse reverses tool name transformation in response data.
-func (t *Transformer) RestoreToolNamesInResponse(data []byte, nameMap map[string]string) []byte {
-	if len(nameMap) == 0 {
-		return data
-	}
-	s := string(data)
-	for transformed, original := range nameMap {
-		s = strings.ReplaceAll(s, `"`+transformed+`"`, `"`+original+`"`)
-	}
-	return []byte(s)
-}
-
-// CaptureSignatures extracts and caches thinking signatures from a response event.
-func (t *Transformer) CaptureSignatures(sessionID string, event map[string]interface{}) {
-	// Look for content_block_stop with thinking block
-	if event["type"] != "content_block_stop" {
-		return
-	}
-	contentBlock, ok := event["content_block"].(map[string]interface{})
-	if !ok {
-		return
-	}
-	if contentBlock["type"] != "thinking" {
-		return
-	}
-	sig, _ := contentBlock["signature"].(string)
-	text, _ := contentBlock["thinking"].(string)
-	if sig != "" && text != "" {
-		t.sigCache.Store(sessionID, text, sig)
-	}
 }
 
 // --- Internal methods ---
@@ -240,134 +188,6 @@ func (t *Transformer) computeSessionHashFromBody(body map[string]interface{}) st
 	return computeSessionHashInline(userID, systemPrompt, firstMsg)
 }
 
-func (t *Transformer) restoreSignatures(body map[string]interface{}, accountID string) {
-	messages, ok := body["messages"].([]interface{})
-	if !ok {
-		return
-	}
-
-	sessionID := ""
-	if metadata, ok := body["metadata"].(map[string]interface{}); ok {
-		if uid, ok := metadata["user_id"].(string); ok {
-			sessionID = ExtractSessionUUID(uid)
-		}
-	}
-	if sessionID == "" {
-		return
-	}
-
-	for _, msg := range messages {
-		m, ok := msg.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		content, ok := m["content"].([]interface{})
-		if !ok {
-			continue
-		}
-		for _, block := range content {
-			b, ok := block.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if b["type"] != "thinking" {
-				continue
-			}
-			// If signature is missing, try to restore from cache
-			if _, hasSig := b["signature"]; hasSig {
-				continue
-			}
-			text, _ := b["thinking"].(string)
-			if text == "" {
-				continue
-			}
-			if sig := t.sigCache.Lookup(sessionID, text); sig != "" {
-				b["signature"] = sig
-				slog.Debug("restored thinking signature", "sessionId", sessionID)
-			}
-		}
-	}
-}
-
-func (t *Transformer) normalizeToolNames(body map[string]interface{}) map[string]string {
-	nameMap := make(map[string]string)
-
-	// Transform tools array
-	if tools, ok := body["tools"].([]interface{}); ok {
-		for _, tool := range tools {
-			if m, ok := tool.(map[string]interface{}); ok {
-				if name, ok := m["name"].(string); ok {
-					newName := toPascalCase(name)
-					if newName != name {
-						nameMap[newName] = name
-						m["name"] = newName
-					}
-				}
-			}
-		}
-	}
-
-	// Transform tool_choice
-	if tc, ok := body["tool_choice"].(map[string]interface{}); ok {
-		if name, ok := tc["name"].(string); ok {
-			if newName, exists := findTransformed(nameMap, name); exists {
-				tc["name"] = newName
-			}
-		}
-	}
-
-	// Transform tool_use in messages
-	if messages, ok := body["messages"].([]interface{}); ok {
-		for _, msg := range messages {
-			if m, ok := msg.(map[string]interface{}); ok {
-				if content, ok := m["content"].([]interface{}); ok {
-					for _, block := range content {
-						if b, ok := block.(map[string]interface{}); ok {
-							if b["type"] == "tool_use" {
-								if name, ok := b["name"].(string); ok {
-									if newName, exists := findTransformed(nameMap, name); exists {
-										b["name"] = newName
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return nameMap
-}
-
-func toPascalCase(name string) string {
-	parts := strings.FieldsFunc(name, func(r rune) bool {
-		return r == '_' || r == '-'
-	})
-	if len(parts) == 0 {
-		return name
-	}
-
-	var b strings.Builder
-	for _, part := range parts {
-		if len(part) > 0 {
-			b.WriteByte(byte(strings.ToUpper(string(part[0]))[0]))
-			b.WriteString(strings.ToLower(part[1:]))
-		}
-	}
-	b.WriteString("_tool")
-	return b.String()
-}
-
-func findTransformed(nameMap map[string]string, original string) (string, bool) {
-	for transformed, orig := range nameMap {
-		if orig == original {
-			return transformed, true
-		}
-	}
-	return "", false
-}
-
 // IsWarmupRequest checks if the request is a warmup/non-productive request.
 func IsWarmupRequest(body map[string]interface{}) bool {
 	// Check for warmup ping
@@ -429,15 +249,6 @@ func WarmupEvents(model string) []string {
 		`event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}` + "\n\n",
 		`event: message_stop` + "\n" + `data: {"type":"message_stop"}` + "\n\n",
 	}
-}
-
-// BuildWarmupResponse creates a synthetic SSE response for warmup requests (no delay, for tests).
-func BuildWarmupResponse(model string) []byte {
-	var buf []byte
-	for _, e := range WarmupEvents(model) {
-		buf = append(buf, []byte(e)...)
-	}
-	return buf
 }
 
 func generateShortID() string {

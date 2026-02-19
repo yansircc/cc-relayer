@@ -1,12 +1,14 @@
 package relay
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +20,9 @@ import (
 	"github.com/yansir/cc-relayer/internal/scheduler"
 	"github.com/yansir/cc-relayer/internal/store"
 )
+
+// Ban signal patterns in 403 response bodies.
+var banSignalPattern = regexp.MustCompile(`(?i)(organization has been disabled|account has been disabled|Too many active sessions|only authorized for use with claude code)`)
 
 // TransportProvider supplies per-account HTTP clients.
 type TransportProvider interface {
@@ -67,9 +72,6 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Capture latest Claude Code User-Agent version
-	r.captureUserAgent(ctx, req.Header.Get("User-Agent"))
-
 	// Parse request body
 	body, rawBody, err := parseBody(req)
 	if err != nil {
@@ -80,15 +82,6 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 	model, _ := body["model"].(string)
 	isStream, _ := body["stream"].(bool)
 	isOpus := isOpusModel(model)
-
-	// Check weekly Opus cost
-	if isOpus {
-		authMw := auth.NewMiddleware(r.store, nil, r.cfg) // crypto not needed here
-		if err := authMw.CheckWeeklyOpusCost(ctx, keyInfo); err != nil {
-			writeError(w, http.StatusPaymentRequired, "billing_error", err.Error())
-			return
-		}
-	}
 
 	// Warmup interception — stream events with ~20ms delay to simulate network latency
 	if identity.IsWarmupRequest(body) {
@@ -106,18 +99,6 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 		}
 		return
 	}
-
-	// Acquire concurrency slot
-	authMw := auth.NewMiddleware(r.store, nil, r.cfg)
-	requestID, err := authMw.AcquireConcurrency(ctx, keyInfo)
-	if err != nil {
-		writeError(w, http.StatusTooManyRequests, "rate_limit_error", err.Error())
-		return
-	}
-	// Use background context for cleanup so it runs even if client disconnects
-	defer func() {
-		authMw.ReleaseConcurrency(context.Background(), keyInfo.ID, requestID)
-	}()
 
 	// Session binding — try to look up a bound account from previous requests
 	sessionUUID := extractSessionUUID(body)
@@ -203,12 +184,7 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 				upReq.Header.Add(k, v)
 			}
 		}
-		// For non-CC clients, override User-Agent with the latest captured version
-		upstreamUA := ""
-		if !result.IsRealCC {
-			upstreamUA = r.getLatestUserAgent(ctx)
-		}
-		identity.SetRequiredHeaders(upReq.Header, accessToken, r.cfg.ClaudeAPIVersion, r.cfg.ClaudeBetaHeader, upstreamUA)
+		identity.SetRequiredHeaders(upReq.Header, accessToken, r.cfg.ClaudeAPIVersion, r.cfg.ClaudeBetaHeader, "", model)
 		if isStream {
 			upReq.Header.Set("Accept", "text/event-stream")
 		}
@@ -225,8 +201,11 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 
 		// Handle retriable errors
 		if shouldRetry(resp.StatusCode) && attempt < r.cfg.MaxRetryAccounts {
-			r.handleUpstreamError(ctx, acct, resp, isOpus)
+			// Read body before closing for error analysis
+			errBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+
+			r.handleUpstreamError(ctx, acct, resp, errBody, isOpus)
 
 			// 403 may be transient — retry same account up to 2x before switching
 			if resp.StatusCode == 403 {
@@ -274,14 +253,14 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 		}
 
 		if isStream {
-			completed := r.streamResponse(ctx, w, resp, acct, keyInfo, model, result)
+			completed := r.streamResponse(ctx, w, resp, acct, model)
 			// Only update lastUsedAt on complete streams (not interrupted)
 			if completed {
 				now := time.Now().UTC().Format(time.RFC3339)
 				_ = r.accounts.Update(context.Background(), acct.ID, map[string]string{"lastUsedAt": now})
 			}
 		} else {
-			r.jsonResponse(ctx, w, resp, acct, keyInfo, model, result)
+			r.jsonResponse(w, resp)
 			now := time.Now().UTC().Format(time.RFC3339)
 			_ = r.accounts.Update(context.Background(), acct.ID, map[string]string{"lastUsedAt": now})
 		}
@@ -297,7 +276,7 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 
 // streamResponse streams the upstream SSE response to the client.
 // Returns true if the stream completed normally, false if interrupted.
-func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, acct *account.Account, keyInfo *auth.KeyInfo, model string, result *identity.TransformResult) bool {
+func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, acct *account.Account, model string) bool {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "api_error", "streaming not supported")
@@ -309,15 +288,8 @@ func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp 
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(resp.StatusCode)
 
-	scanner := NewSSEScanner(resp.Body)
-	sessionID := identity.ExtractSessionUUID("")
-	if metadata, ok := result.Body["metadata"].(map[string]interface{}); ok {
-		if uid, ok := metadata["user_id"].(string); ok {
-			sessionID = identity.ExtractSessionUUID(uid)
-		}
-	}
-
-	var usage Usage
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024) // 1MB max line
 
 	completed := true
 	for scanner.Scan() {
@@ -330,32 +302,6 @@ func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp 
 
 		line := scanner.Text()
 
-		// Restore tool names if needed
-		if len(result.ToolNameMap) > 0 && strings.HasPrefix(line, "data: ") {
-			data := []byte(line[6:])
-			data = r.transformer.RestoreToolNamesInResponse(data, result.ToolNameMap)
-			line = "data: " + string(data)
-		}
-
-		// Parse usage and capture signatures from SSE data lines
-		if strings.HasPrefix(line, "data: ") {
-			data := []byte(line[6:])
-			var event map[string]interface{}
-			if json.Unmarshal(data, &event) == nil {
-				// Capture thinking signatures
-				if sessionID != "" {
-					r.transformer.CaptureSignatures(sessionID, event)
-				}
-				// Track usage
-				switch event["type"] {
-				case "message_start":
-					ParseMessageStart(data, &usage)
-				case "message_delta":
-					ParseMessageDelta(data, &usage)
-				}
-			}
-		}
-
 		fmt.Fprintf(w, "%s\n", line)
 		if line == "" {
 			flusher.Flush()
@@ -363,31 +309,14 @@ func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp 
 	}
 	flusher.Flush()
 
-	// Accumulate Opus cost after stream completes (even partial)
-	if IsOpus(model) && (usage.InputTokens > 0 || usage.OutputTokens > 0) {
-		r.rateLimit.AccumulateOpusCost(context.Background(), keyInfo.ID, usage.InputTokens, usage.OutputTokens)
-	}
-
 	return completed
 }
 
-func (r *Relay) jsonResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, acct *account.Account, keyInfo *auth.KeyInfo, model string, result *identity.TransformResult) {
+func (r *Relay) jsonResponse(w http.ResponseWriter, resp *http.Response) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "api_error", "failed to read upstream response")
 		return
-	}
-
-	// Restore tool names
-	if len(result.ToolNameMap) > 0 {
-		body = r.transformer.RestoreToolNamesInResponse(body, result.ToolNameMap)
-	}
-
-	// Track usage for Opus cost accumulation
-	if IsOpus(model) {
-		if u := ParseJSONUsage(body); u != nil && (u.InputTokens > 0 || u.OutputTokens > 0) {
-			r.rateLimit.AccumulateOpusCost(context.Background(), keyInfo.ID, u.InputTokens, u.OutputTokens)
-		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -395,10 +324,10 @@ func (r *Relay) jsonResponse(ctx context.Context, w http.ResponseWriter, resp *h
 	w.Write(body)
 }
 
-func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, resp *http.Response, isOpus bool) {
+func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, resp *http.Response, errBody []byte, isOpus bool) {
 	switch resp.StatusCode {
 	case 529:
-		until := time.Now().Add(r.cfg.OverloadedCooldown).UTC().Format(time.RFC3339)
+		until := time.Now().Add(r.cfg.ErrorPause529).UTC().Format(time.RFC3339)
 		_ = r.accounts.Update(ctx, acct.ID, map[string]string{
 			"overloadedAt":    time.Now().UTC().Format(time.RFC3339),
 			"overloadedUntil": until,
@@ -417,10 +346,34 @@ func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, 
 		}
 		slog.Warn("account rate limited (429)", "accountId", acct.ID)
 
+	case 403:
+		bodyStr := string(errBody)
+		if banSignalPattern.MatchString(bodyStr) {
+			// Ban signal detected — mark blocked and pause for 30 minutes
+			until := time.Now().Add(r.cfg.ErrorPause401).UTC().Format(time.RFC3339)
+			_ = r.accounts.Update(ctx, acct.ID, map[string]string{
+				"status":          "blocked",
+				"errorMessage":    fmt.Sprintf("ban signal detected: %s", truncate(bodyStr, 200)),
+				"schedulable":     "false",
+				"overloadedUntil": until,
+			})
+			slog.Error("ban signal detected (403)", "accountId", acct.ID, "body", truncate(bodyStr, 200))
+		} else {
+			// Generic 403 — pause for 10 minutes to avoid rapid retries
+			until := time.Now().Add(r.cfg.ErrorPause403).UTC().Format(time.RFC3339)
+			_ = r.accounts.Update(ctx, acct.ID, map[string]string{
+				"overloadedAt":    time.Now().UTC().Format(time.RFC3339),
+				"overloadedUntil": until,
+			})
+			slog.Warn("account forbidden (403)", "accountId", acct.ID)
+		}
+
 	case 401:
+		until := time.Now().Add(r.cfg.ErrorPause401).UTC().Format(time.RFC3339)
 		_ = r.accounts.Update(ctx, acct.ID, map[string]string{
-			"status":       "error",
-			"errorMessage": "upstream 401: authentication failed",
+			"status":          "error",
+			"errorMessage":    "upstream 401: authentication failed",
+			"overloadedUntil": until,
 		})
 		// Trigger async token refresh
 		go func() {
@@ -462,40 +415,6 @@ func extractSessionUUID(body map[string]interface{}) string {
 	return ""
 }
 
-// captureUserAgent captures the latest Claude Code User-Agent from incoming requests.
-// Only updates Redis if the incoming version is newer than the stored one.
-func (r *Relay) captureUserAgent(ctx context.Context, ua string) {
-	fullUA, version, ok := identity.ParseCCUserAgent(ua)
-	if !ok {
-		return
-	}
-
-	cached, err := r.store.GetCachedUserAgent(ctx)
-	if err != nil {
-		return
-	}
-
-	if cached == "" {
-		_ = r.store.SetCachedUserAgent(ctx, fullUA)
-		return
-	}
-
-	_, cachedVersion, cachedOK := identity.ParseCCUserAgent(cached)
-	if !cachedOK || identity.IsNewerVersion(version, cachedVersion) {
-		_ = r.store.SetCachedUserAgent(ctx, fullUA)
-		slog.Debug("user-agent updated", "from", cached, "to", fullUA)
-	}
-}
-
-// getLatestUserAgent returns the cached User-Agent or a default fallback.
-func (r *Relay) getLatestUserAgent(ctx context.Context) string {
-	cached, err := r.store.GetCachedUserAgent(ctx)
-	if err == nil && cached != "" {
-		return cached
-	}
-	return identity.DefaultUserAgent()
-}
-
 // isOldSession detects requests that are continuations of existing sessions.
 // If true, the request must not be silently routed to a different account.
 func isOldSession(body map[string]interface{}) bool {
@@ -533,6 +452,13 @@ func isOldSession(body map[string]interface{}) bool {
 	}
 
 	return false
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func writeError(w http.ResponseWriter, status int, errType, msg string) {

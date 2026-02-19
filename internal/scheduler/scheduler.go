@@ -2,12 +2,10 @@ package scheduler
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/yansir/cc-relayer/internal/account"
@@ -51,7 +49,7 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 	// 2. Sticky session — check Redis for existing binding
 	if opts.SessionHash != "" {
 		accountID, err := s.store.GetStickySession(ctx, opts.SessionHash)
-		if err == nil && accountID != "" && !contains(opts.ExcludeIDs, accountID) {
+		if err == nil && accountID != "" && !slices.Contains(opts.ExcludeIDs, accountID) {
 			acct, err := s.accounts.Get(ctx, accountID)
 			if err == nil && acct != nil && s.isAvailable(acct, opts) {
 				// Renew sticky session TTL
@@ -69,7 +67,7 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 
 	var candidates []*account.Account
 	for _, acct := range all {
-		if contains(opts.ExcludeIDs, acct.ID) {
+		if slices.Contains(opts.ExcludeIDs, acct.ID) {
 			continue
 		}
 		if !s.isAvailable(acct, opts) {
@@ -134,42 +132,6 @@ func (s *Scheduler) isAvailable(acct *account.Account, opts SelectOptions) bool 
 	return true
 }
 
-// ComputeSessionHash generates a hash from request content for sticky session binding.
-// Priority: metadata.user_id session UUID > system prompt hash > first message hash
-func ComputeSessionHash(userID string, systemPrompt string, firstMessage string) string {
-	// Try to extract session UUID from user_id
-	if idx := strings.LastIndex(userID, "session_"); idx >= 0 {
-		session := userID[idx:]
-		return hashStr("session:" + session)
-	}
-
-	// Fall back to system prompt hash
-	if systemPrompt != "" {
-		return hashStr("system:" + systemPrompt[:min(len(systemPrompt), 200)])
-	}
-
-	// Fall back to first message
-	if firstMessage != "" {
-		return hashStr("msg:" + firstMessage[:min(len(firstMessage), 200)])
-	}
-
-	return ""
-}
-
-func hashStr(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:16]) // 32 hex chars
-}
-
-func contains(list []string, item string) bool {
-	for _, v := range list {
-		if v == item {
-			return true
-		}
-	}
-	return false
-}
-
 func timeOrZero(t *time.Time) time.Time {
 	if t == nil {
 		return time.Time{}
@@ -177,9 +139,3 @@ func timeOrZero(t *time.Time) time.Time {
 	return *t
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

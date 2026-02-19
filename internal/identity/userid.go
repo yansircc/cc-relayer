@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
-	"strings"
 )
 
 // userIDPattern matches Claude Code user_id format:
@@ -87,15 +86,3 @@ func GetAccountUUID(extInfo map[string]interface{}) string {
 	return ""
 }
 
-// HasValidUserIDFormat checks if a user_id matches the expected Claude Code format.
-func HasValidUserIDFormat(userID string) bool {
-	return userIDPattern.MatchString(userID)
-}
-
-// ExtractSessionFromUserID gets the session tail from a user_id.
-func ExtractSessionFromUserID(userID string) string {
-	if idx := strings.LastIndex(userID, "session_"); idx >= 0 {
-		return userID[idx+len("session_"):]
-	}
-	return ""
-}

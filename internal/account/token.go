@@ -15,6 +15,11 @@ import (
 	"github.com/yansir/cc-relayer/internal/store"
 )
 
+const (
+	oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	oauthTokenURL = "https://console.anthropic.com/v1/oauth/token"
+)
+
 // HTTPTransportProvider returns per-account HTTP transports.
 type HTTPTransportProvider interface {
 	GetHTTPTransport(acct *Account) *http.Transport
@@ -141,10 +146,10 @@ func (tm *TokenManager) callOAuthRefresh(ctx context.Context, accountID, refresh
 	body, _ := json.Marshal(map[string]string{
 		"grant_type":    "refresh_token",
 		"refresh_token": refreshToken,
-		"client_id":     tm.cfg.OAuthClientID,
+		"client_id":     oauthClientID,
 	})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", tm.cfg.OAuthTokenURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", oauthTokenURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

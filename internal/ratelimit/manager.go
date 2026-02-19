@@ -2,9 +2,7 @@ package ratelimit
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"time"
 
@@ -137,9 +135,9 @@ func (m *Manager) cleanup(ctx context.Context) {
 			if windowEnd, err := time.Parse(time.RFC3339, data["sessionWindowEnd"]); err == nil {
 				if now.After(windowEnd.Add(time.Minute)) {
 					_ = m.store.SetAccountFields(ctx, id, map[string]string{
-						"schedulable":       "true",
+						"schedulable":         "true",
 						"fiveHourAutoStopped": "false",
-						"fiveHourStatus":    "",
+						"fiveHourStatus":      "",
 					})
 					slog.Info("account restored from 5h auto-stop", "accountId", id)
 				}
@@ -148,9 +146,9 @@ func (m *Manager) cleanup(ctx context.Context) {
 				if stoppedAt, err := time.Parse(time.RFC3339, data["fiveHourStoppedAt"]); err == nil {
 					if now.After(stoppedAt.Add(5*time.Hour + time.Minute)) {
 						_ = m.store.SetAccountFields(ctx, id, map[string]string{
-							"schedulable":       "true",
+							"schedulable":         "true",
 							"fiveHourAutoStopped": "false",
-							"fiveHourStatus":    "",
+							"fiveHourStatus":      "",
 						})
 						slog.Info("account restored from 5h auto-stop (fallback)", "accountId", id)
 					}
@@ -176,26 +174,20 @@ func (m *Manager) cleanup(ctx context.Context) {
 				slog.Info("account Opus rate limit cleared", "accountId", id)
 			}
 		}
+
+		// Check blocked account recovery (auto-unblock after pause expires)
+		if data["status"] == "blocked" {
+			if overloadedUntil, err := time.Parse(time.RFC3339, data["overloadedUntil"]); err == nil {
+				if now.After(overloadedUntil) {
+					_ = m.store.SetAccountFields(ctx, id, map[string]string{
+						"status":          "active",
+						"errorMessage":    "",
+						"schedulable":     "true",
+						"overloadedUntil": "",
+					})
+					slog.Info("blocked account recovered", "accountId", id)
+				}
+			}
+		}
 	}
-}
-
-// AccumulateOpusCost adds the cost to the API key's weekly counter.
-func (m *Manager) AccumulateOpusCost(ctx context.Context, keyID string, inputTokens, outputTokens int) {
-	// Opus pricing: $15/MTok input, $75/MTok output
-	cost := float64(inputTokens)/1_000_000*15.0 + float64(outputTokens)/1_000_000*75.0
-	cost = math.Round(cost*1000) / 1000 // Round to 3 decimal places
-
-	if cost <= 0 {
-		return
-	}
-
-	weekStr := isoWeekString(time.Now())
-	if err := m.store.IncrWeeklyOpusCost(ctx, keyID, weekStr, cost); err != nil {
-		slog.Error("accumulate opus cost", "keyId", keyID, "error", err)
-	}
-}
-
-func isoWeekString(t time.Time) string {
-	year, week := t.ISOWeek()
-	return fmt.Sprintf("%d-W%02d", year, week)
 }

@@ -56,12 +56,33 @@ func FilterHeaders(original http.Header) http.Header {
 }
 
 // SetRequiredHeaders sets the required headers for the upstream request.
-func SetRequiredHeaders(h http.Header, accessToken, apiVersion, betaHeader, userAgent string) {
+// The model parameter is used to filter beta flags for non-CC models (e.g. Haiku).
+func SetRequiredHeaders(h http.Header, accessToken, apiVersion, betaHeader, userAgent, model string) {
+	beta := betaHeader
+	if strings.Contains(strings.ToLower(model), "haiku") {
+		beta = filterBetaForHaiku(betaHeader)
+	}
+
 	h.Set("Authorization", "Bearer "+accessToken)
 	h.Set("anthropic-version", apiVersion)
-	h.Set("anthropic-beta", betaHeader)
+	h.Set("anthropic-beta", beta)
 	h.Set("Content-Type", "application/json")
 	if userAgent != "" {
 		h.Set("User-Agent", userAgent)
 	}
+}
+
+// filterBetaForHaiku removes claude-code-* and fine-grained-tool-streaming-* beta flags
+// that are not applicable to Haiku models.
+func filterBetaForHaiku(betaHeader string) string {
+	parts := strings.Split(betaHeader, ",")
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		p := strings.TrimSpace(part)
+		if strings.HasPrefix(p, "claude-code-") || strings.HasPrefix(p, "fine-grained-tool-streaming-") {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return strings.Join(filtered, ",")
 }

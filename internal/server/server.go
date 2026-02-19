@@ -39,10 +39,9 @@ type Server struct {
 func New(cfg *config.Config, s *store.Store, crypto *account.Crypto, tm *transport.Manager) *Server {
 	as := account.NewAccountStore(s, crypto)
 	tokMgr := account.NewTokenManager(s, as, cfg, tm)
-	authMw := auth.NewMiddleware(s, crypto, cfg)
+	authMw := auth.NewMiddleware(cfg)
 	sched := scheduler.New(s, as, cfg)
-	sigCache := identity.NewSignatureCache()
-	trans := identity.NewTransformer(s, sigCache, cfg)
+	trans := identity.NewTransformer(s, cfg)
 	rl := ratelimit.NewManager(s)
 	r := relay.New(s, as, tokMgr, sched, trans, rl, cfg, tm)
 
@@ -95,16 +94,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
-
-	// Admin endpoints
-	admin := &AdminHandler{
-		cfg:      s.cfg,
-		accounts: s.accounts,
-		tokens:   s.tokens,
-		authMw:   s.authMw,
-		store:    s.store,
-	}
-	admin.Register(mux)
 }
 
 // Run starts the server and blocks until shutdown.
