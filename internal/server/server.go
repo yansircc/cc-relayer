@@ -83,6 +83,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		w.Write([]byte(`{"success":true}`))
 	})
 
+	// Admin endpoints (authenticated)
+	mux.Handle("POST /admin/accounts/oauth", s.authMw.Authenticate(http.HandlerFunc(s.handleOAuthAdd)))
+	mux.Handle("GET /admin/accounts", s.authMw.Authenticate(http.HandlerFunc(s.handleListAccounts)))
+	mux.Handle("DELETE /admin/accounts/{id}", s.authMw.Authenticate(http.HandlerFunc(s.handleDeleteAccount)))
+
 	// Health check
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.store.Ping(r.Context()); err != nil {
