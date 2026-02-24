@@ -17,4 +17,5 @@ require (
 	github.com/klauspost/compress v1.17.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 )

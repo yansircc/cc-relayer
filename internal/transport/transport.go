@@ -14,6 +14,7 @@ import (
 	"github.com/yansir/cc-relayer/internal/account"
 	"github.com/yansir/cc-relayer/internal/config"
 	utls "github.com/refraction-networking/utls"
+	"golang.org/x/net/http2"
 	"golang.org/x/net/proxy"
 )
 
@@ -27,8 +28,8 @@ type Manager struct {
 }
 
 type poolEntry struct {
-	transport *http.Transport
-	lastUsed  time.Time
+	roundTripper http.RoundTripper
+	lastUsed     time.Time
 }
 
 // NewManager creates a new transport Manager.
@@ -42,14 +43,19 @@ func NewManager(cfg *config.Config) *Manager {
 // GetClient returns an http.Client with a per-account transport (utls + optional proxy).
 func (m *Manager) GetClient(acct *account.Account) *http.Client {
 	return &http.Client{
-		Transport: m.getTransport(acct),
+		Transport: m.getRoundTripper(acct),
 		Timeout:   m.requestTimeout,
 	}
 }
 
-// GetHTTPTransport returns the raw http.Transport for an account (used by token refresh).
+// GetHTTPTransport returns an http.Transport for proxy scenarios (used by token refresh).
 func (m *Manager) GetHTTPTransport(acct *account.Account) *http.Transport {
-	return m.getTransport(acct)
+	if acct.Proxy == nil {
+		return nil
+	}
+	return &http.Transport{
+		DialTLSContext: proxyDialer(acct.Proxy),
+	}
 }
 
 // RunCleanup starts the background cleanup goroutine. Blocks until ctx is canceled.
@@ -73,14 +79,16 @@ func (m *Manager) Close() {
 	defer m.mu.Unlock()
 
 	for key, entry := range m.entries {
-		entry.transport.CloseIdleConnections()
+		if t, ok := entry.roundTripper.(interface{ CloseIdleConnections() }); ok {
+			t.CloseIdleConnections()
+		}
 		delete(m.entries, key)
 	}
 }
 
 // --- Pool (internal) ---
 
-func (m *Manager) getTransport(acct *account.Account) *http.Transport {
+func (m *Manager) getRoundTripper(acct *account.Account) http.RoundTripper {
 	key := transportKey(acct)
 
 	m.mu.Lock()
@@ -88,15 +96,12 @@ func (m *Manager) getTransport(acct *account.Account) *http.Transport {
 
 	if entry, ok := m.entries[key]; ok {
 		entry.lastUsed = time.Now()
-		return entry.transport
+		return entry.roundTripper
 	}
 
-	t := buildTransport(acct)
-	m.entries[key] = &poolEntry{
-		transport: t,
-		lastUsed:  time.Now(),
-	}
-	return t
+	rt := buildRoundTripper(acct)
+	m.entries[key] = &poolEntry{roundTripper: rt, lastUsed: time.Now()}
+	return rt
 }
 
 func (m *Manager) cleanup(idleTimeout time.Duration) {
@@ -106,7 +111,9 @@ func (m *Manager) cleanup(idleTimeout time.Duration) {
 	cutoff := time.Now().Add(-idleTimeout)
 	for key, entry := range m.entries {
 		if entry.lastUsed.Before(cutoff) {
-			entry.transport.CloseIdleConnections()
+			if t, ok := entry.roundTripper.(interface{ CloseIdleConnections() }); ok {
+				t.CloseIdleConnections()
+			}
 			delete(m.entries, key)
 		}
 	}
@@ -121,20 +128,20 @@ func transportKey(acct *account.Account) string {
 
 // --- Transport building ---
 
-func buildTransport(acct *account.Account) *http.Transport {
-	t := &http.Transport{
-		MaxIdleConnsPerHost: 2,
-		IdleConnTimeout:     5 * time.Minute,
-		ForceAttemptHTTP2:   true,
-	}
-
+func buildRoundTripper(acct *account.Account) http.RoundTripper {
 	if acct.Proxy != nil {
-		t.DialTLSContext = proxyDialer(acct.Proxy)
-	} else {
-		t.DialTLSContext = dialUTLS
+		return &http.Transport{
+			MaxIdleConnsPerHost: 2,
+			IdleConnTimeout:     5 * time.Minute,
+			DialTLSContext:      proxyDialer(acct.Proxy),
+		}
 	}
-
-	return t
+	// 直连：用 http2.Transport，绕开 utls UConn 的 *tls.Conn 类型断言问题
+	return &http2.Transport{
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return dialUTLS(ctx, network, addr)
+		},
+	}
 }
 
 // --- TLS (utls Chrome fingerprint) ---

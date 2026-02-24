@@ -40,7 +40,7 @@ func (c *Crypto) DeriveKey(salt string) ([]byte, error) {
 	}
 	c.mu.RUnlock()
 
-	key, err := scrypt.Key([]byte(c.encryptionKey), []byte(salt), 32768, 8, 1, 32)
+	key, err := scrypt.Key([]byte(c.encryptionKey), []byte(salt), 16384, 8, 1, 32)
 	if err != nil {
 		return nil, fmt.Errorf("scrypt derive: %w", err)
 	}
