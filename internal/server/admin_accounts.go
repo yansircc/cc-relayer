@@ -113,17 +113,13 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 	// Session bindings for this account
 	sessions, _ := s.store.ListSessionBindingsForAccount(r.Context(), id)
 
-	// Compute auto priority score
+	// Compute auto priority score from FiveHourStatus
 	var autoScore int
-	if acct.PriorityMode == "auto" && s.cfg.Limit5HCost > 0 {
-		costs, _ := s.store.QueryAccountCosts(r.Context())
-		if info, ok := costs[acct.ID]; ok {
-			remaining := 1.0 - info.FiveHourCost/s.cfg.Limit5HCost
-			if remaining < 0 {
-				remaining = 0
-			}
-			autoScore = int(remaining * 100)
-		} else {
+	if acct.PriorityMode == "auto" {
+		switch acct.FiveHourStatus {
+		case "allowed_warning":
+			autoScore = 30
+		default:
 			autoScore = 100
 		}
 	}

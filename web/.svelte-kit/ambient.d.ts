@@ -86,6 +86,7 @@ declare module '$env/static/private' {
 	export const SHLVL: string;
 	export const ANTHROPIC_BASE_URL: string;
 	export const TERMINFO: string;
+	export const npm_config_loglevel: string;
 	export const HOMEBREW_PREFIX: string;
 	export const ZSH_CACHE_DIR: string;
 	export const HTTP_PROXY: string;
@@ -198,6 +199,7 @@ declare module '$env/dynamic/private' {
 		SHLVL: string;
 		ANTHROPIC_BASE_URL: string;
 		TERMINFO: string;
+		npm_config_loglevel: string;
 		HOMEBREW_PREFIX: string;
 		ZSH_CACHE_DIR: string;
 		HTTP_PROXY: string;

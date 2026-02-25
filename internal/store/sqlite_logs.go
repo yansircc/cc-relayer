@@ -126,49 +126,6 @@ func (s *SQLiteStore) QueryUsagePeriods(ctx context.Context, userID string) ([]U
 	return result, nil
 }
 
-// QueryAccountCosts returns 5-hour and 7-day cost totals per account.
-func (s *SQLiteStore) QueryAccountCosts(ctx context.Context) (map[string]AccountCostInfo, error) {
-	now := time.Now().UTC()
-	fiveHoursAgo := now.Add(-5 * time.Hour).Unix()
-	sevenDaysAgo := now.Add(-7 * 24 * time.Hour).Unix()
-
-	result := make(map[string]AccountCostInfo)
-
-	// 5-hour costs
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT account_id, COALESCE(SUM(cost_usd),0)
-		FROM request_log WHERE created_at >= ? GROUP BY account_id`, fiveHoursAgo)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var accountID string
-			var cost float64
-			rows.Scan(&accountID, &cost)
-			info := result[accountID]
-			info.FiveHourCost = cost
-			result[accountID] = info
-		}
-	}
-
-	// 7-day costs
-	rows2, err := s.db.QueryContext(ctx,
-		`SELECT account_id, COALESCE(SUM(cost_usd),0)
-		FROM request_log WHERE created_at >= ? GROUP BY account_id`, sevenDaysAgo)
-	if err == nil {
-		defer rows2.Close()
-		for rows2.Next() {
-			var accountID string
-			var cost float64
-			rows2.Scan(&accountID, &cost)
-			info := result[accountID]
-			info.SevenDayCost = cost
-			result[accountID] = info
-		}
-	}
-
-	return result, nil
-}
-
 // QueryUserTotalCosts returns total cost per user across all time.
 func (s *SQLiteStore) QueryUserTotalCosts(ctx context.Context) (map[string]float64, error) {
 	rows, err := s.db.QueryContext(ctx,

@@ -47,11 +47,21 @@ export function statusColor(status: string): string {
 	return '';
 }
 
-export function pctClass(pct: number): string {
-	if (pct >= 50) return 'g';
-	if (pct >= 20) return 'o';
-	if (pct > 0) return 'r';
-	return 'muted';
+export function remainClass(remain: number | null): string {
+	if (remain == null) return 'muted';
+	if (remain >= 70) return 'g';
+	if (remain >= 30) return 'o';
+	return 'r';
+}
+
+export function remainTime(resetTs: number | null, window: '5h' | '7d'): string {
+	if (!resetTs) return '';
+	const diff = resetTs * 1000 - Date.now();
+	if (diff <= 0) return window === '5h' ? '0/5h' : '0/7d';
+	if (window === '5h') {
+		return (diff / 3600000).toFixed(1) + '/5h';
+	}
+	return (diff / 86400000).toFixed(1) + '/7d';
 }
 
 export function eventTypeColor(type: string): string {

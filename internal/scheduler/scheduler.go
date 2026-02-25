@@ -65,9 +65,6 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
 
-	// Fetch account costs for auto-priority scoring
-	costs, _ := s.store.QueryAccountCosts(ctx)
-
 	var candidates []*account.Account
 	for _, acct := range all {
 		if slices.Contains(opts.ExcludeIDs, acct.ID) {
@@ -92,18 +89,13 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 	for i, acct := range candidates {
 		pri := acct.Priority
 		if acct.PriorityMode == "auto" {
-			// Auto priority: derive from 5h remaining percentage
-			// Higher remaining = higher priority (0-100 scale)
-			if s.cfg.Limit5HCost > 0 {
-				if info, ok := costs[acct.ID]; ok {
-					remaining := 1.0 - info.FiveHourCost/s.cfg.Limit5HCost
-					if remaining < 0 {
-						remaining = 0
-					}
-					pri = int(remaining * 100)
-				} else {
-					pri = 100 // no cost data = full remaining
-				}
+			// Auto priority: derive from FiveHourStatus header
+			// "allowed_warning" = nearing limit → lower priority
+			switch acct.FiveHourStatus {
+			case "allowed_warning":
+				pri = 30
+			default:
+				pri = 100
 			}
 		}
 		scoredCandidates[i] = scored{acct: acct, priority: pri}

@@ -26,6 +26,9 @@ func (m *Manager) CaptureHeaders(ctx context.Context, accountID string, headers 
 		m.updateFiveHourStatus(ctx, accountID, status)
 	}
 
+	// Utilization + reset timestamps
+	m.captureUtilization(ctx, accountID, headers)
+
 	// Reset timestamp (from 429 responses)
 	resetStr := headers.Get("anthropic-ratelimit-unified-reset")
 	if resetStr != "" {
@@ -92,6 +95,27 @@ func (m *Manager) updateResetTime(ctx context.Context, accountID, resetStr strin
 	}
 
 	_ = m.store.SetAccountFields(ctx, accountID, fields)
+}
+
+func (m *Manager) captureUtilization(ctx context.Context, accountID string, headers http.Header) {
+	fields := map[string]string{}
+
+	if v := headers.Get("anthropic-ratelimit-unified-5h-utilization"); v != "" {
+		fields["fiveHourUtil"] = v
+	}
+	if v := headers.Get("anthropic-ratelimit-unified-5h-reset"); v != "" {
+		fields["fiveHourReset"] = v
+	}
+	if v := headers.Get("anthropic-ratelimit-unified-7d-utilization"); v != "" {
+		fields["sevenDayUtil"] = v
+	}
+	if v := headers.Get("anthropic-ratelimit-unified-7d-reset"); v != "" {
+		fields["sevenDayReset"] = v
+	}
+
+	if len(fields) > 0 {
+		_ = m.store.SetAccountFields(ctx, accountID, fields)
+	}
 }
 
 // MarkOpusRateLimited records Opus-specific rate limiting.

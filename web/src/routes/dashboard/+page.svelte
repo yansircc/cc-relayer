@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
-	import { fmtNum, fmtCost, timeAgo, tagClass, pctClass, eventTypeColor } from '$lib/format';
+	import { fmtNum, fmtCost, timeAgo, tagClass, remainClass, remainTime, eventTypeColor } from '$lib/format';
 	import CooldownCell from '$lib/components/CooldownCell.svelte';
 
 	interface UsagePeriod {
@@ -21,8 +21,10 @@
 		priority: number;
 		overloaded_until: string | null;
 		last_used_at: string | null;
-		five_hour_pct: number;
-		seven_day_pct: number;
+		five_hour_util: number | null;
+		seven_day_util: number | null;
+		five_hour_reset: number | null;
+		seven_day_reset: number | null;
 	}
 
 	interface UserView {
@@ -179,6 +181,7 @@ claude -p --model haiku \\
 	{#if data.accounts.length === 0}
 		<p class="muted">no accounts</p>
 	{:else}
+		{@const ref = data.accounts.find(a => a.status === 'active' && a.five_hour_util != null)}
 		<table><thead>
 			<tr>
 				<th>email</th>
@@ -186,8 +189,8 @@ claude -p --model haiku \\
 				<th>pri</th>
 				<th>cooldown</th>
 				<th>last used</th>
-				<th class="num">5h</th>
-				<th class="num">7d</th>
+				<th class="num">{ref ? remainTime(ref.five_hour_reset, '5h') : '5h'}</th>
+				<th class="num">{ref ? remainTime(ref.seven_day_reset, '7d') : '7d'}</th>
 			</tr></thead><tbody>
 			{#each data.accounts as a (a.id)}
 				<tr>
@@ -196,8 +199,8 @@ claude -p --model haiku \\
 					<td class={a.priority_mode === 'auto' ? 'muted' : ''}>{a.priority_mode === 'auto' ? 'auto' : a.priority}</td>
 					<CooldownCell until={a.overloaded_until} />
 					<td>{timeAgo(a.last_used_at ?? '')}</td>
-					<td class="num {pctClass(a.five_hour_pct)}">{a.status === 'blocked' || a.status === 'disabled' ? '\u2013' : Math.round(a.five_hour_pct) + '%'}</td>
-					<td class="num {pctClass(a.seven_day_pct)}">{a.status === 'blocked' || a.status === 'disabled' ? '\u2013' : Math.round(a.seven_day_pct) + '%'}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.seven_day_util != null}{@const remain = 100 - a.seven_day_util}<span class={remainClass(remain)}>{remain}%</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
 				</tr>
 			{/each}
 		</tbody></table>

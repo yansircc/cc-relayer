@@ -56,7 +56,6 @@ type Store interface {
 
 	// Dashboard & analytics
 	QueryUsagePeriods(ctx context.Context, userID string) ([]UsagePeriod, error)
-	QueryAccountCosts(ctx context.Context) (map[string]AccountCostInfo, error)
 	QueryUserTotalCosts(ctx context.Context) (map[string]float64, error)
 	QueryModelUsage(ctx context.Context, userID string) ([]ModelUsageRow, error)
 
@@ -117,12 +116,6 @@ type ModelUsageRow struct {
 	OutputTokens    int64   `json:"output_tokens"`
 	CacheReadTokens int64   `json:"cache_read_tokens"`
 	CostUSD         float64 `json:"cost_usd"`
-}
-
-// AccountCostInfo holds cost data for an account over two windows.
-type AccountCostInfo struct {
-	FiveHourCost float64
-	SevenDayCost float64
 }
 
 // SessionBindingInfo describes an active session binding.

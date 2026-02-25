@@ -30,6 +30,10 @@ type Account struct {
 
 	// Rate limit state
 	FiveHourStatus      string     `json:"fiveHourStatus,omitempty"`
+	FiveHourUtil        float64    `json:"fiveHourUtil,omitempty"`
+	FiveHourReset       int64      `json:"fiveHourReset,omitempty"`
+	SevenDayUtil        float64    `json:"sevenDayUtil,omitempty"`
+	SevenDayReset       int64      `json:"sevenDayReset,omitempty"`
 	SessionWindowStart  *time.Time `json:"sessionWindowStart,omitempty"`
 	SessionWindowEnd    *time.Time `json:"sessionWindowEnd,omitempty"`
 	FiveHourAutoStopped bool       `json:"fiveHourAutoStopped,omitempty"`
@@ -218,6 +222,10 @@ func (as *AccountStore) fromMap(m map[string]string) *Account {
 		PriorityMode:        priorityMode,
 		ExpiresAt:           atoi64(m["expiresAt"], 0),
 		FiveHourStatus:      m["fiveHourStatus"],
+		FiveHourUtil:        atof(m["fiveHourUtil"]),
+		FiveHourReset:       atoi64(m["fiveHourReset"], 0),
+		SevenDayUtil:        atof(m["sevenDayUtil"]),
+		SevenDayReset:       atoi64(m["sevenDayReset"], 0),
 		FiveHourAutoStopped: m["fiveHourAutoStopped"] == "true",
 	}
 
@@ -272,4 +280,11 @@ func atoi64(s string, def int64) int64 {
 		return n
 	}
 	return def
+}
+
+func atof(s string) float64 {
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	return 0
 }

@@ -18,7 +18,8 @@ const accountCols = `id, email, status, schedulable, priority, priority_mode, er
 	last_used_at, last_refresh_at, proxy_json, ext_info_json,
 	five_hour_status, five_hour_auto_stopped, five_hour_stopped_at,
 	session_window_start, session_window_end, auto_stop_on_warning,
-	opus_rate_limit_end_at, overloaded_at, overloaded_until, rate_limited_at`
+	opus_rate_limit_end_at, overloaded_at, overloaded_until, rate_limited_at,
+	five_hour_util, five_hour_reset, seven_day_util, seven_day_reset`
 
 func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string, error) {
 	var (
@@ -34,6 +35,8 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		opusEnd                             sql.NullInt64
 		olAt, olUntil                       sql.NullInt64
 		rlAt                                sql.NullInt64
+		fhUtil, sdUtil                      float64
+		fhReset, sdReset                    int64
 	)
 	err := scanner.Scan(
 		&id, &email, &status, &sched, &prio, &priMode, &errMsg,
@@ -42,6 +45,7 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		&fhStatus, &fhAutoStopped, &fhStoppedAt,
 		&winStart, &winEnd, &autoStop,
 		&opusEnd, &olAt, &olUntil, &rlAt,
+		&fhUtil, &fhReset, &sdUtil, &sdReset,
 	)
 	if err != nil {
 		return nil, err
@@ -68,6 +72,10 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		"fiveHourStatus":      fhStatus,
 		"fiveHourAutoStopped": boolStr(fhAutoStopped),
 		"autoStopOnWarning":   boolStr(autoStop),
+		"fiveHourUtil":        strconv.FormatFloat(fhUtil, 'f', -1, 64),
+		"fiveHourReset":       strconv.FormatInt(fhReset, 10),
+		"sevenDayUtil":        strconv.FormatFloat(sdUtil, 'f', -1, 64),
+		"sevenDayReset":       strconv.FormatInt(sdReset, 10),
 	}
 	setTimeField(m, "lastUsedAt", lastUsedAt)
 	setTimeField(m, "lastRefreshAt", lastRefreshAt)

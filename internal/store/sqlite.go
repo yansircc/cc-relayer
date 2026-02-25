@@ -100,6 +100,10 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 		{"request_log", "cost_usd", "ALTER TABLE request_log ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0"},
 		{"accounts", "priority_mode", "ALTER TABLE accounts ADD COLUMN priority_mode TEXT NOT NULL DEFAULT 'auto'"},
 		{"accounts", "email", "ALTER TABLE accounts RENAME COLUMN name TO email"},
+		{"accounts", "five_hour_util", "ALTER TABLE accounts ADD COLUMN five_hour_util REAL NOT NULL DEFAULT 0"},
+		{"accounts", "five_hour_reset", "ALTER TABLE accounts ADD COLUMN five_hour_reset INTEGER NOT NULL DEFAULT 0"},
+		{"accounts", "seven_day_util", "ALTER TABLE accounts ADD COLUMN seven_day_util REAL NOT NULL DEFAULT 0"},
+		{"accounts", "seven_day_reset", "ALTER TABLE accounts ADD COLUMN seven_day_reset INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, m := range migrations {
 		if !s.columnExists(ctx, m.table, m.column) {
@@ -170,6 +174,10 @@ var fieldMap = map[string]colInfo{
 	"overloadedAt":        {"overloaded_at", sqlTimeNullable},
 	"overloadedUntil":     {"overloaded_until", sqlTimeNullable},
 	"rateLimitedAt":       {"rate_limited_at", sqlTimeNullable},
+	"fiveHourUtil":        {"five_hour_util", sqlFloat},
+	"fiveHourReset":       {"five_hour_reset", sqlInt64},
+	"sevenDayUtil":        {"seven_day_util", sqlFloat},
+	"sevenDayReset":       {"seven_day_reset", sqlInt64},
 }
 
 func sqlStr(s string) interface{}  { return s }
@@ -178,6 +186,10 @@ func sqlInt(s string) interface{}  { n, _ := strconv.Atoi(s); return n }
 func sqlInt64(s string) interface{} {
 	n, _ := strconv.ParseInt(s, 10, 64)
 	return n
+}
+func sqlFloat(s string) interface{} {
+	f, _ := strconv.ParseFloat(s, 64)
+	return f
 }
 func sqlTime(s string) interface{} {
 	t, err := time.Parse(time.RFC3339, s)

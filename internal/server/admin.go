@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"time"
 
@@ -83,9 +82,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Usage periods
 	usage, _ := s.store.QueryUsagePeriods(ctx, "")
 
-	// Accounts with cost percentages
+	// Accounts with utilization from response headers
 	acctList, _ := s.accounts.List(ctx)
-	costs, _ := s.store.QueryAccountCosts(ctx)
 
 	type accountView struct {
 		ID              string     `json:"id"`
@@ -95,23 +93,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Priority        int        `json:"priority"`
 		OverloadedUntil *time.Time `json:"overloaded_until,omitempty"`
 		LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
-		FiveHourPct     float64    `json:"five_hour_pct"`
-		SevenDayPct     float64    `json:"seven_day_pct"`
+		FiveHourUtil    *int       `json:"five_hour_util"`
+		SevenDayUtil    *int       `json:"seven_day_util"`
+		FiveHourReset   *int64     `json:"five_hour_reset"`
+		SevenDayReset   *int64     `json:"seven_day_reset"`
 	}
 
 	acctViews := make([]accountView, 0, len(acctList))
 	for _, a := range acctList {
-		fhPct := 100.0
-		sdPct := 100.0
-		if info, ok := costs[a.ID]; ok {
-			if s.cfg.Limit5HCost > 0 {
-				fhPct = math.Max(0, (1-info.FiveHourCost/s.cfg.Limit5HCost)*100)
-			}
-			if s.cfg.Limit7DCost > 0 {
-				sdPct = math.Max(0, (1-info.SevenDayCost/s.cfg.Limit7DCost)*100)
-			}
-		}
-		acctViews = append(acctViews, accountView{
+		av := accountView{
 			ID:              a.ID,
 			Email:           a.Email,
 			Status:          a.Status,
@@ -119,9 +109,22 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			Priority:        a.Priority,
 			OverloadedUntil: a.OverloadedUntil,
 			LastUsedAt:      a.LastUsedAt,
-			FiveHourPct:     math.Round(fhPct*10) / 10,
-			SevenDayPct:     math.Round(sdPct*10) / 10,
-		})
+		}
+		if a.FiveHourUtil > 0 || a.FiveHourReset > 0 {
+			pct := int(a.FiveHourUtil * 100)
+			av.FiveHourUtil = &pct
+			if a.FiveHourReset > 0 {
+				av.FiveHourReset = &a.FiveHourReset
+			}
+		}
+		if a.SevenDayUtil > 0 || a.SevenDayReset > 0 {
+			pct := int(a.SevenDayUtil * 100)
+			av.SevenDayUtil = &pct
+			if a.SevenDayReset > 0 {
+				av.SevenDayReset = &a.SevenDayReset
+			}
+		}
+		acctViews = append(acctViews, av)
 	}
 
 	// Users with total cost
