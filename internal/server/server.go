@@ -38,7 +38,6 @@ type Server struct {
 	relay        *relay.Relay
 	transportMgr *transport.Manager
 	bus          *events.Bus
-	logHandler   *events.LogHandler
 	httpServer   *http.Server
 	version      string
 	startTime    time.Time
@@ -65,7 +64,6 @@ func New(cfg *config.Config, s store.Store, crypto *account.Crypto, tm *transpor
 		relay:        r,
 		transportMgr: tm,
 		bus:          bus,
-		logHandler:   lh,
 		version:      version,
 		startTime:    time.Now(),
 	}
@@ -104,9 +102,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /admin/accounts", auth(http.HandlerFunc(s.handleListAccounts)))
 	mux.Handle("GET /admin/accounts/{id}", auth(http.HandlerFunc(s.handleGetAccount)))
 	mux.Handle("DELETE /admin/accounts/{id}", auth(http.HandlerFunc(s.handleDeleteAccount)))
+	mux.Handle("POST /admin/accounts/{id}/email", auth(http.HandlerFunc(s.handleUpdateAccountEmail)))
 	mux.Handle("POST /admin/accounts/{id}/status", auth(http.HandlerFunc(s.handleUpdateAccountStatus)))
 	mux.Handle("POST /admin/accounts/{id}/priority", auth(http.HandlerFunc(s.handleUpdateAccountPriority)))
 	mux.Handle("POST /admin/accounts/{id}/refresh", auth(http.HandlerFunc(s.handleRefreshAccount)))
+	mux.Handle("POST /admin/accounts/{id}/test", auth(http.HandlerFunc(s.handleTestAccount)))
 
 	// Admin: login (no auth — this IS the auth endpoint)
 	mux.HandleFunc("POST /admin/login", s.handleLogin)
@@ -119,22 +119,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /admin/users/{id}/regenerate", auth(http.HandlerFunc(s.handleRegenerateUserToken)))
 	mux.Handle("POST /admin/users/{id}/status", auth(http.HandlerFunc(s.handleUpdateUserStatus)))
 
-	// Admin: dashboard & usage (authenticated)
+	// Admin: dashboard (authenticated)
 	mux.Handle("GET /admin/dashboard", auth(http.HandlerFunc(s.handleDashboard)))
-	mux.Handle("GET /admin/usage", auth(http.HandlerFunc(s.handleUsage)))
-	mux.Handle("GET /admin/request-log", auth(http.HandlerFunc(s.handleRequestLog)))
-
-	// Admin: sessions (authenticated)
-	mux.Handle("GET /admin/sessions", auth(http.HandlerFunc(s.handleSessions)))
-	mux.Handle("GET /admin/sessions/oauth", auth(http.HandlerFunc(s.handleListOAuthSessions)))
-	mux.Handle("DELETE /admin/sessions/binding/{id}", auth(http.HandlerFunc(s.handleDeleteSessionBinding)))
-	mux.Handle("DELETE /admin/sessions/sticky/{id}", auth(http.HandlerFunc(s.handleDeleteStickySession)))
 
 	// Admin: health (authenticated)
 	mux.Handle("GET /admin/health", auth(http.HandlerFunc(s.handleHealth)))
-
-	// Admin: SSE events (authenticated)
-	mux.Handle("GET /admin/events", auth(http.HandlerFunc(s.handleEvents)))
 
 	// Health check
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {

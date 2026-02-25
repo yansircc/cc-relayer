@@ -65,6 +65,9 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
 
+	// Fetch account costs for auto-priority scoring
+	costs, _ := s.store.QueryAccountCosts(ctx)
+
 	var candidates []*account.Account
 	for _, acct := range all {
 		if slices.Contains(opts.ExcludeIDs, acct.ID) {
@@ -80,24 +83,50 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 		return nil, fmt.Errorf("no available accounts")
 	}
 
-	// Sort: priority DESC, then lastUsedAt ASC (round-robin effect)
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].Priority != candidates[j].Priority {
-			return candidates[i].Priority > candidates[j].Priority
+	// Compute effective priority for each candidate
+	type scored struct {
+		acct     *account.Account
+		priority int
+	}
+	scoredCandidates := make([]scored, len(candidates))
+	for i, acct := range candidates {
+		pri := acct.Priority
+		if acct.PriorityMode == "auto" {
+			// Auto priority: derive from 5h remaining percentage
+			// Higher remaining = higher priority (0-100 scale)
+			if s.cfg.Limit5HCost > 0 {
+				if info, ok := costs[acct.ID]; ok {
+					remaining := 1.0 - info.FiveHourCost/s.cfg.Limit5HCost
+					if remaining < 0 {
+						remaining = 0
+					}
+					pri = int(remaining * 100)
+				} else {
+					pri = 100 // no cost data = full remaining
+				}
+			}
 		}
-		ti := timeOrZero(candidates[i].LastUsedAt)
-		tj := timeOrZero(candidates[j].LastUsedAt)
+		scoredCandidates[i] = scored{acct: acct, priority: pri}
+	}
+
+	// Sort: priority DESC, then lastUsedAt ASC (round-robin effect)
+	sort.Slice(scoredCandidates, func(i, j int) bool {
+		if scoredCandidates[i].priority != scoredCandidates[j].priority {
+			return scoredCandidates[i].priority > scoredCandidates[j].priority
+		}
+		ti := timeOrZero(scoredCandidates[i].acct.LastUsedAt)
+		tj := timeOrZero(scoredCandidates[j].acct.LastUsedAt)
 		return ti.Before(tj)
 	})
 
-	selected := candidates[0]
+	selected := scoredCandidates[0].acct
 
 	// Bind to sticky session
 	if opts.SessionHash != "" {
 		_ = s.store.SetStickySession(ctx, opts.SessionHash, selected.ID, s.cfg.StickySessionTTL)
 	}
 
-	slog.Debug("account selected", "accountId", selected.ID, "name", selected.Name, "priority", selected.Priority)
+	slog.Debug("account selected", "accountId", selected.ID, "email", selected.Email, "priority", scoredCandidates[0].priority, "mode", selected.PriorityMode)
 	return selected, nil
 }
 

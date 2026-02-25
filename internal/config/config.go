@@ -40,6 +40,10 @@ type Config struct {
 	MaxRetryAccounts int
 	MaxCacheControls int
 
+	// Cost limits
+	Limit5HCost float64
+	Limit7DCost float64
+
 	// Logging
 	LogLevel string
 }
@@ -72,6 +76,9 @@ func Load() *Config {
 		MaxRetryAccounts: envInt("MAX_RETRY_ACCOUNTS", 2),
 		MaxCacheControls: envInt("MAX_CACHE_CONTROLS", 4),
 
+		Limit5HCost: envFloat("LIMIT_5H_COST", 5.0),
+		Limit7DCost: envFloat("LIMIT_7D_COST", 25.0),
+
 		LogLevel: envOr("LOG_LEVEL", "info"),
 	}
 }
@@ -102,6 +109,15 @@ func envInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func envFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return fallback

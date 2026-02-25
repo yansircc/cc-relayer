@@ -91,6 +91,17 @@ func (b *Bus) Unsubscribe(id int) {
 	}
 }
 
+// Recent returns the most recent events from the ring buffer (up to limit).
+func (b *Bus) Recent(limit int) []Event {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	all := b.recentLocked()
+	if limit > 0 && len(all) > limit {
+		return all[len(all)-limit:]
+	}
+	return all
+}
+
 func (b *Bus) recentLocked() []Event {
 	if b.ringCount == 0 {
 		return nil

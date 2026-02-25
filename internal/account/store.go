@@ -15,7 +15,7 @@ const claudeSalt = "salt"
 // Account represents a Claude Official OAuth account.
 type Account struct {
 	ID            string     `json:"id"`
-	Name          string     `json:"name"`
+	Email         string     `json:"email"`
 	Status        string     `json:"status"` // active, created, error, disabled
 	ErrorMessage  string     `json:"errorMessage,omitempty"`
 	Schedulable   bool       `json:"schedulable"`
@@ -35,6 +35,9 @@ type Account struct {
 	FiveHourAutoStopped bool       `json:"fiveHourAutoStopped,omitempty"`
 	OpusRateLimitEndAt  *time.Time `json:"opusRateLimitEndAt,omitempty"`
 	OverloadedUntil     *time.Time `json:"overloadedUntil,omitempty"`
+
+	// Priority mode
+	PriorityMode string `json:"priorityMode,omitempty"` // "auto" or "manual"
 
 	// Extra info (account_uuid used for identity transform)
 	ExtInfo map[string]interface{} `json:"extInfo,omitempty"`
@@ -59,7 +62,7 @@ func NewAccountStore(s store.Store, c *Crypto) *AccountStore {
 }
 
 // Create adds a new account. The refreshToken is encrypted before storage.
-func (as *AccountStore) Create(ctx context.Context, name, refreshToken string, proxy *ProxyConfig, priority int) (*Account, error) {
+func (as *AccountStore) Create(ctx context.Context, email, refreshToken string, proxy *ProxyConfig, priority int) (*Account, error) {
 	id := uuid.New().String()
 
 	encRefresh, err := as.crypto.Encrypt(refreshToken, claudeSalt)
@@ -70,7 +73,7 @@ func (as *AccountStore) Create(ctx context.Context, name, refreshToken string, p
 	now := time.Now().UTC()
 	fields := map[string]string{
 		"id":             id,
-		"name":           name,
+		"email":          email,
 		"refreshToken":   encRefresh,
 		"status":         "created",
 		"schedulable":    "true",
@@ -94,7 +97,7 @@ func (as *AccountStore) Create(ctx context.Context, name, refreshToken string, p
 
 	return &Account{
 		ID:          id,
-		Name:        name,
+		Email:       email,
 		Status:      "created",
 		Schedulable: true,
 		Priority:    priority,
@@ -201,13 +204,18 @@ func (as *AccountStore) StoreTokens(ctx context.Context, id, accessToken, refres
 
 // fromMap converts a Redis hash map to an Account struct.
 func (as *AccountStore) fromMap(m map[string]string) *Account {
+	priorityMode := m["priorityMode"]
+	if priorityMode == "" {
+		priorityMode = "auto"
+	}
 	a := &Account{
 		ID:                  m["id"],
-		Name:                m["name"],
+		Email:               m["email"],
 		Status:              m["status"],
 		ErrorMessage:        m["errorMessage"],
 		Schedulable:         m["schedulable"] == "true",
 		Priority:            atoi(m["priority"], 50),
+		PriorityMode:        priorityMode,
 		ExpiresAt:           atoi64(m["expiresAt"], 0),
 		FiveHourStatus:      m["fiveHourStatus"],
 		FiveHourAutoStopped: m["fiveHourAutoStopped"] == "true",

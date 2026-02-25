@@ -51,19 +51,17 @@ type Store interface {
 
 	// Request log
 	InsertRequestLog(ctx context.Context, log *RequestLog) error
-	QueryUsageSummary(ctx context.Context, opts UsageQueryOpts) ([]*UsageSummaryRow, error)
 	QueryRequestLogs(ctx context.Context, opts RequestLogQuery) ([]*RequestLog, int, error)
-	GetDashboardData(ctx context.Context) (*DashboardData, error)
 	PurgeOldLogs(ctx context.Context, before time.Time) (int64, error)
 
-	// WebUI: in-memory state views
-	ListSessionBindings(ctx context.Context) ([]SessionBindingInfo, error)
-	ListStickySessions(ctx context.Context) ([]StickySessionInfo, error)
-	DeleteSessionBinding(ctx context.Context, sessionUUID string) error
-	DeleteStickySession(ctx context.Context, hash string) error
+	// Dashboard & analytics
+	QueryUsagePeriods(ctx context.Context, userID string) ([]UsagePeriod, error)
+	QueryAccountCosts(ctx context.Context) (map[string]AccountCostInfo, error)
+	QueryUserTotalCosts(ctx context.Context) (map[string]float64, error)
+	QueryModelUsage(ctx context.Context, userID string) ([]ModelUsageRow, error)
 
-	// OAuth sessions listing
-	ListOAuthSessions(ctx context.Context) ([]OAuthSessionInfo, error)
+	// Session bindings for account detail
+	ListSessionBindingsForAccount(ctx context.Context, accountID string) ([]SessionBindingInfo, error)
 }
 
 // User represents an API user with a hashed token.
@@ -87,28 +85,10 @@ type RequestLog struct {
 	OutputTokens      int
 	CacheReadTokens   int
 	CacheCreateTokens int
+	CostUSD           float64
 	Status            string
 	DurationMs        int64
 	CreatedAt         time.Time
-}
-
-// UsageQueryOpts filters for usage summary queries.
-type UsageQueryOpts struct {
-	UserID    string
-	AccountID string
-	Since     time.Time
-	Until     time.Time
-	GroupBy   string // "day", "user", "account", "model"
-}
-
-// UsageSummaryRow is one row of aggregated usage data.
-type UsageSummaryRow struct {
-	Key               string `json:"key"`
-	RequestCount      int    `json:"request_count"`
-	InputTokens       int64  `json:"input_tokens"`
-	OutputTokens      int64  `json:"output_tokens"`
-	CacheReadTokens   int64  `json:"cache_read_tokens"`
-	CacheCreateTokens int64  `json:"cache_create_tokens"`
 }
 
 // RequestLogQuery is a paginated request log query.
@@ -119,31 +99,30 @@ type RequestLogQuery struct {
 	Offset    int
 }
 
-// DashboardData provides all data for the admin dashboard.
-type DashboardData struct {
-	AccountSummary AccountSummary     `json:"account_summary"`
-	DailyUsage     []*DailyUsage      `json:"daily_usage"`
-	TopUsers       []*UsageSummaryRow `json:"top_users"`
-	TopAccounts    []*UsageSummaryRow `json:"top_accounts"`
+// UsagePeriod represents usage for a named period (today, yesterday, 3d, 7d, 30d).
+type UsagePeriod struct {
+	Label           string  `json:"label"`
+	Requests        int     `json:"requests"`
+	InputTokens     int64   `json:"input_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	CacheReadTokens int64   `json:"cache_read_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
 }
 
-// AccountSummary counts accounts by status.
-type AccountSummary struct {
-	Total      int `json:"total"`
-	Active     int `json:"active"`
-	Blocked    int `json:"blocked"`
-	Error      int `json:"error"`
-	Overloaded int `json:"overloaded"`
+// ModelUsageRow represents per-model usage breakdown.
+type ModelUsageRow struct {
+	Model           string  `json:"model"`
+	Requests        int     `json:"requests"`
+	InputTokens     int64   `json:"input_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	CacheReadTokens int64   `json:"cache_read_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
 }
 
-// DailyUsage is one day's aggregated usage.
-type DailyUsage struct {
-	Date              string `json:"date"`
-	RequestCount      int    `json:"request_count"`
-	InputTokens       int64  `json:"input_tokens"`
-	OutputTokens      int64  `json:"output_tokens"`
-	CacheReadTokens   int64  `json:"cache_read_tokens"`
-	CacheCreateTokens int64  `json:"cache_create_tokens"`
+// AccountCostInfo holds cost data for an account over two windows.
+type AccountCostInfo struct {
+	FiveHourCost float64
+	SevenDayCost float64
 }
 
 // SessionBindingInfo describes an active session binding.
@@ -153,17 +132,4 @@ type SessionBindingInfo struct {
 	CreatedAt   string    `json:"created_at"`
 	LastUsedAt  string    `json:"last_used_at"`
 	ExpiresAt   time.Time `json:"expires_at"`
-}
-
-// StickySessionInfo describes an active sticky session.
-type StickySessionInfo struct {
-	Hash      string    `json:"hash"`
-	AccountID string    `json:"account_id"`
-	ExpiresAt time.Time `json:"expires_at"`
-}
-
-// OAuthSessionInfo describes a pending OAuth PKCE session.
-type OAuthSessionInfo struct {
-	SessionID string    `json:"session_id"`
-	ExpiresAt time.Time `json:"expires_at"`
 }

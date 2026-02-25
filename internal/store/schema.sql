@@ -1,9 +1,10 @@
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
+    email TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'created',
     schedulable INTEGER NOT NULL DEFAULT 1,
     priority INTEGER NOT NULL DEFAULT 50,
+    priority_mode TEXT NOT NULL DEFAULT 'auto',
     error_message TEXT NOT NULL DEFAULT '',
     refresh_token_enc TEXT NOT NULL DEFAULT '',
     access_token_enc TEXT NOT NULL DEFAULT '',
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS request_log (
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     cache_create_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0,
     status TEXT NOT NULL,
     duration_ms INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL

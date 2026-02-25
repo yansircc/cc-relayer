@@ -1,0 +1,20 @@
+{
+	"/": [
+		"src/routes/+page.ts"
+	],
+	"/accounts/[id]": [
+		"src/routes/accounts/[id]/+page.ts"
+	],
+	"/add-account": [
+		"src/routes/add-account/+page.ts"
+	],
+	"/dashboard": [
+		"src/routes/dashboard/+page.ts"
+	],
+	"/login": [
+		"src/routes/login/+page.ts"
+	],
+	"/users/[id]": [
+		"src/routes/users/[id]/+page.ts"
+	]
+}
