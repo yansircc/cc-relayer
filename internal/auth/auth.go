@@ -2,12 +2,15 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/yansir/cc-relayer/internal/config"
+	"github.com/yansir/cc-relayer/internal/store"
 )
 
 type contextKey string
@@ -19,27 +22,29 @@ type KeyInfo struct {
 	ID             string
 	Name           string
 	BoundAccountID string
+	IsAdmin        bool
 }
 
-// Middleware validates the static API token.
+// Middleware validates API tokens against the admin token and user store.
 type Middleware struct {
-	cfg *config.Config
+	adminToken string
+	store      store.Store
 }
 
-func NewMiddleware(cfg *config.Config) *Middleware {
-	return &Middleware{cfg: cfg}
+func NewMiddleware(adminToken string, s store.Store) *Middleware {
+	return &Middleware{adminToken: adminToken, store: s}
 }
 
-// Authenticate is the HTTP middleware that validates the static API token.
+// Authenticate is the HTTP middleware that validates tokens.
 func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiKey := extractAPIKey(r)
-		if apiKey == "" {
+		token := extractToken(r)
+		if token == "" {
 			writeError(w, http.StatusUnauthorized, "authentication_error", "missing or invalid API key")
 			return
 		}
 
-		keyInfo, err := m.validateKey(apiKey)
+		keyInfo, err := m.validateToken(r.Context(), token)
 		if err != nil {
 			slog.Warn("auth failed", "error", err)
 			writeError(w, http.StatusUnauthorized, "authentication_error", err.Error())
@@ -51,26 +56,56 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 	})
 }
 
-func (m *Middleware) validateKey(apiKey string) (*KeyInfo, error) {
-	if apiKey != m.cfg.StaticToken {
+// ValidateToken validates a token and returns KeyInfo if valid.
+func (m *Middleware) ValidateToken(ctx context.Context, token string) (*KeyInfo, bool) {
+	ki, err := m.validateToken(ctx, token)
+	return ki, err == nil && ki != nil
+}
+
+func (m *Middleware) validateToken(ctx context.Context, token string) (*KeyInfo, error) {
+	// Check admin token with constant-time comparison.
+	if subtle.ConstantTimeCompare([]byte(token), []byte(m.adminToken)) == 1 {
+		return &KeyInfo{
+			ID:      "admin",
+			Name:    "admin",
+			IsAdmin: true,
+		}, nil
+	}
+
+	// Hash token and look up user.
+	hash := sha256.Sum256([]byte(token))
+	hashHex := hex.EncodeToString(hash[:])
+
+	user, err := m.store.GetUserByTokenHash(ctx, hashHex)
+	if err != nil {
+		return nil, fmt.Errorf("token lookup failed: %w", err)
+	}
+	if user == nil {
 		return nil, fmt.Errorf("invalid API key")
 	}
+	if user.Status != "active" {
+		return nil, fmt.Errorf("user %s is %s", user.Name, user.Status)
+	}
+
+	go m.store.UpdateUserLastActive(context.Background(), user.ID)
+
 	return &KeyInfo{
-		ID:   "default",
-		Name: "default",
+		ID:   user.ID,
+		Name: user.Name,
 	}, nil
 }
 
 // --- Helpers ---
 
-func extractAPIKey(r *http.Request) string {
-	// x-api-key header
+func extractToken(r *http.Request) string {
 	if key := r.Header.Get("x-api-key"); key != "" {
 		return key
 	}
-	// Authorization: Bearer
 	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	if c, err := r.Cookie("cc_session"); err == nil && c.Value != "" {
+		return c.Value
 	}
 	return ""
 }

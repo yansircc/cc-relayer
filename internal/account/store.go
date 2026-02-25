@@ -48,13 +48,13 @@ type ProxyConfig struct {
 	Password string `json:"password,omitempty"`
 }
 
-// AccountStore manages Claude Official accounts in Redis.
+// AccountStore manages Claude Official accounts.
 type AccountStore struct {
-	store  *store.Store
+	store  store.Store
 	crypto *Crypto
 }
 
-func NewAccountStore(s *store.Store, c *Crypto) *AccountStore {
+func NewAccountStore(s store.Store, c *Crypto) *AccountStore {
 	return &AccountStore{store: s, crypto: c}
 }
 
@@ -187,12 +187,15 @@ func (as *AccountStore) StoreTokens(ctx context.Context, id, accessToken, refres
 	expiresAt := now.Add(time.Duration(expiresIn) * time.Second).UnixMilli()
 
 	return as.store.SetAccountFields(ctx, id, map[string]string{
-		"accessToken":  encAccess,
-		"refreshToken": encRefresh,
-		"expiresAt":    strconv.FormatInt(expiresAt, 10),
+		"accessToken":   encAccess,
+		"refreshToken":  encRefresh,
+		"expiresAt":     strconv.FormatInt(expiresAt, 10),
 		"lastRefreshAt": now.Format(time.RFC3339),
-		"status":       "active",
-		"errorMessage": "",
+		"status":        "active",
+		"errorMessage":  "",
+		// Clear temporary cooldown markers after a successful refresh.
+		"overloadedAt":    "",
+		"overloadedUntil": "",
 	})
 }
 

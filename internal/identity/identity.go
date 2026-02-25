@@ -26,9 +26,8 @@ var allowedHeaders = map[string]bool{
 	"user-agent":        true,
 	"anthropic-version": true,
 	"anthropic-beta":    true,
-	"x-api-key":         true,
-	"authorization":     true,
-	"x-app":             true,
+	"anthropic-dangerous-direct-browser-access": true,
+	"x-app": true,
 }
 
 // FilterHeaders builds a clean header set with only allowed headers.
@@ -50,33 +49,41 @@ func FilterHeaders(original http.Header) http.Header {
 }
 
 // SetRequiredHeaders sets the required headers for the upstream request.
-// The model parameter is used to filter beta flags for non-CC models (e.g. Haiku).
-func SetRequiredHeaders(h http.Header, accessToken, apiVersion, betaHeader, userAgent, model string) {
-	beta := betaHeader
-	if strings.Contains(strings.ToLower(model), "haiku") {
-		beta = filterBetaForHaiku(betaHeader)
-	}
+func SetRequiredHeaders(h http.Header, accessToken, apiVersion, betaHeader string) {
+	// Strip client auth headers — the relay's static token must never reach upstream.
+	h.Del("x-api-key")
+	h.Del("Authorization")
 
 	h.Set("Authorization", "Bearer "+accessToken)
-	h.Set("anthropic-version", apiVersion)
-	h.Set("anthropic-beta", beta)
-	h.Set("Content-Type", "application/json")
-	if userAgent != "" {
-		h.Set("User-Agent", userAgent)
+	if h.Get("anthropic-version") == "" {
+		h.Set("anthropic-version", apiVersion)
 	}
+	if mergedBeta := mergeBetaHeaders(h.Get("anthropic-beta"), betaHeader); mergedBeta != "" {
+		h.Set("anthropic-beta", mergedBeta)
+	}
+	h.Set("Content-Type", "application/json")
 }
 
-func filterBetaForHaiku(betaHeader string) string {
-	parts := strings.Split(betaHeader, ",")
-	filtered := make([]string, 0, len(parts))
-	for _, part := range parts {
-		p := strings.TrimSpace(part)
-		if strings.HasPrefix(p, "claude-code-") || strings.HasPrefix(p, "fine-grained-tool-streaming-") {
+func mergeBetaHeaders(clientBeta, relayBeta string) string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, raw := range []string{clientBeta, relayBeta} {
+		if raw == "" {
 			continue
 		}
-		filtered = append(filtered, p)
+		for _, part := range strings.Split(raw, ",") {
+			p := strings.TrimSpace(part)
+			if p == "" {
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
 	}
-	return strings.Join(filtered, ",")
+	return strings.Join(out, ",")
 }
 
 // --- User ID rewriting ---
@@ -143,11 +150,11 @@ var billingHeaderPattern = regexp.MustCompile(`(?i)x-anthropic-billing-header`)
 
 // Transformer applies all identity transformations to a request.
 type Transformer struct {
-	store *store.Store
+	store store.Store
 	cfg   *config.Config
 }
 
-func NewTransformer(s *store.Store, cfg *config.Config) *Transformer {
+func NewTransformer(s store.Store, cfg *config.Config) *Transformer {
 	return &Transformer{store: s, cfg: cfg}
 }
 

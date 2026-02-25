@@ -25,16 +25,16 @@ type HTTPTransportProvider interface {
 	GetHTTPTransport(acct *Account) *http.Transport
 }
 
-// TokenManager handles OAuth token refresh with distributed locking.
+// TokenManager handles OAuth token refresh with locking.
 type TokenManager struct {
-	store     *store.Store
+	store     store.Store
 	accounts  *AccountStore
 	cfg       *config.Config
 	client    *http.Client // default client (no proxy)
 	transport HTTPTransportProvider
 }
 
-func NewTokenManager(s *store.Store, as *AccountStore, cfg *config.Config, tp HTTPTransportProvider) *TokenManager {
+func NewTokenManager(s store.Store, as *AccountStore, cfg *config.Config, tp HTTPTransportProvider) *TokenManager {
 	return &TokenManager{
 		store:     s,
 		accounts:  as,

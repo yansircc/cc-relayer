@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,7 +34,7 @@ type TransportProvider interface {
 
 // Relay orchestrates the request forwarding pipeline.
 type Relay struct {
-	store       *store.Store
+	store       store.Store
 	accounts    *account.AccountStore
 	tokens      *account.TokenManager
 	scheduler   *scheduler.Scheduler
@@ -44,7 +45,7 @@ type Relay struct {
 }
 
 func New(
-	s *store.Store,
+	s store.Store,
 	as *account.AccountStore,
 	tm *account.TokenManager,
 	sched *scheduler.Scheduler,
@@ -63,6 +64,80 @@ func New(
 		cfg:         cfg,
 		transport:   tp,
 	}
+}
+
+// HandleCountTokens proxies token counting requests to the upstream API.
+func (r *Relay) HandleCountTokens(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+	keyInfo := auth.GetKeyInfo(ctx)
+	if keyInfo == nil {
+		writeError(w, http.StatusUnauthorized, "authentication_error", "not authenticated")
+		return
+	}
+
+	req.Body = http.MaxBytesReader(w, req.Body, int64(r.cfg.MaxRequestBodyMB)<<20)
+	rawBody, err := io.ReadAll(req.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request_error", "failed to read body")
+		return
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON body")
+		return
+	}
+	model, _ := body["model"].(string)
+
+	acct, err := r.scheduler.Select(ctx, scheduler.SelectOptions{
+		BoundAccountID: keyInfo.BoundAccountID,
+		IsOpusRequest:  isOpusModel(model),
+	})
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "overloaded_error", "no available accounts")
+		return
+	}
+
+	accessToken, err := r.tokens.EnsureValidToken(ctx, acct.ID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "api_error", "token unavailable")
+		return
+	}
+
+	result := r.transformer.Transform(ctx, body, req.Header, acct)
+	upstreamBody, _ := json.Marshal(result.Body)
+
+	upstreamURL, err := appendRawQuery(r.cfg.ClaudeAPIURL+"/count_tokens", req.URL.RawQuery)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "api_error", "failed to build upstream url")
+		return
+	}
+
+	upReq, err := http.NewRequestWithContext(ctx, "POST", upstreamURL, strings.NewReader(string(upstreamBody)))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "api_error", "failed to create request")
+		return
+	}
+	for k, vals := range result.Headers {
+		for _, v := range vals {
+			upReq.Header.Add(k, v)
+		}
+	}
+	identity.SetRequiredHeaders(upReq.Header, accessToken, r.cfg.ClaudeAPIVersion, r.cfg.ClaudeBetaHeader)
+
+	client := r.transport.GetClient(acct)
+	resp, err := client.Do(upReq)
+	if err != nil {
+		slog.Error("count_tokens upstream failed", "error", err)
+		writeError(w, http.StatusBadGateway, "api_error", "upstream request failed")
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(respBody)
 }
 
 // Handle processes a relay request end-to-end.
@@ -182,7 +257,13 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 		// Build upstream request
 		upstreamBody, _ := json.Marshal(result.Body)
 
-		upReq, err := http.NewRequestWithContext(ctx, "POST", r.cfg.ClaudeAPIURL, strings.NewReader(string(upstreamBody)))
+		upstreamURL, err := appendRawQuery(r.cfg.ClaudeAPIURL, req.URL.RawQuery)
+		if err != nil {
+			lastErr = err
+			break
+		}
+
+		upReq, err := http.NewRequestWithContext(ctx, "POST", upstreamURL, strings.NewReader(string(upstreamBody)))
 		if err != nil {
 			lastErr = err
 			break
@@ -194,7 +275,7 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 				upReq.Header.Add(k, v)
 			}
 		}
-		identity.SetRequiredHeaders(upReq.Header, accessToken, r.cfg.ClaudeAPIVersion, r.cfg.ClaudeBetaHeader, "", model)
+		identity.SetRequiredHeaders(upReq.Header, accessToken, r.cfg.ClaudeAPIVersion, r.cfg.ClaudeBetaHeader)
 		if isStream {
 			upReq.Header.Set("Accept", "text/event-stream")
 		}
@@ -262,17 +343,37 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 			_ = r.store.SetSessionBinding(ctx, sessionUUID, acct.ID, r.cfg.SessionBindingTTL)
 		}
 
+		startTime := time.Now()
+		var usage *usageData
 		if isStream {
-			completed := r.streamResponse(ctx, w, resp, acct, model)
-			// Only update lastUsedAt on complete streams (not interrupted)
+			var completed bool
+			completed, usage = r.streamResponse(ctx, w, resp, acct, model)
 			if completed {
 				now := time.Now().UTC().Format(time.RFC3339)
 				_ = r.accounts.Update(context.Background(), acct.ID, map[string]string{"lastUsedAt": now})
 			}
 		} else {
-			r.jsonResponse(w, resp)
+			usage = r.jsonResponse(w, resp)
 			now := time.Now().UTC().Format(time.RFC3339)
 			_ = r.accounts.Update(context.Background(), acct.ID, map[string]string{"lastUsedAt": now})
+		}
+
+		// Write request log
+		if usage != nil {
+			go func() {
+				_ = r.store.InsertRequestLog(context.Background(), &store.RequestLog{
+					UserID:            keyInfo.ID,
+					AccountID:         acct.ID,
+					Model:             model,
+					InputTokens:       usage.InputTokens,
+					OutputTokens:      usage.OutputTokens,
+					CacheReadTokens:   usage.CacheReadTokens,
+					CacheCreateTokens: usage.CacheCreateTokens,
+					Status:            "ok",
+					DurationMs:        time.Since(startTime).Milliseconds(),
+					CreatedAt:         time.Now().UTC(),
+				})
+			}()
 		}
 		return
 	}
@@ -285,12 +386,13 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 }
 
 // streamResponse streams the upstream SSE response to the client.
-// Returns true if the stream completed normally, false if interrupted.
-func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, acct *account.Account, model string) bool {
+// Returns true if the stream completed normally (false if interrupted),
+// and any usage data captured from the message_delta event.
+func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, acct *account.Account, model string) (bool, *usageData) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "api_error", "streaming not supported")
-		return false
+		return false, nil
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -300,6 +402,9 @@ func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp 
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024) // 1MB max line
+
+	var lastEventType string
+	var capturedUsage *usageData
 
 	completed := true
 	for scanner.Scan() {
@@ -316,22 +421,32 @@ func (r *Relay) streamResponse(ctx context.Context, w http.ResponseWriter, resp 
 		if line == "" {
 			flusher.Flush()
 		}
+
+		if strings.HasPrefix(line, "event: ") {
+			lastEventType = strings.TrimPrefix(line, "event: ")
+		}
+		if lastEventType == "message_delta" && strings.HasPrefix(line, "data: ") {
+			if u := parseUsage(line[6:]); u != nil {
+				capturedUsage = u
+			}
+		}
 	}
 	flusher.Flush()
 
-	return completed
+	return completed, capturedUsage
 }
 
-func (r *Relay) jsonResponse(w http.ResponseWriter, resp *http.Response) {
+func (r *Relay) jsonResponse(w http.ResponseWriter, resp *http.Response) *usageData {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "api_error", "failed to read upstream response")
-		return
+		return nil
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
+	return parseUsage(string(body))
 }
 
 func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, resp *http.Response, errBody []byte, isOpus bool) {
@@ -412,6 +527,28 @@ func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, 
 
 func shouldRetry(statusCode int) bool {
 	return statusCode == 529 || statusCode == 429 || statusCode == 401 || statusCode == 403
+}
+
+func appendRawQuery(rawURL, rawQuery string) (string, error) {
+	if rawQuery == "" {
+		return rawURL, nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	additional, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return "", err
+	}
+	for k, vals := range additional {
+		for _, v := range vals {
+			q.Add(k, v)
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 func parseBody(req *http.Request) (map[string]interface{}, []byte, error) {
@@ -504,6 +641,23 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+type usageData struct {
+	InputTokens       int `json:"input_tokens"`
+	OutputTokens      int `json:"output_tokens"`
+	CacheReadTokens   int `json:"cache_read_input_tokens"`
+	CacheCreateTokens int `json:"cache_creation_input_tokens"`
+}
+
+func parseUsage(data string) *usageData {
+	var wrapper struct {
+		Usage *usageData `json:"usage"`
+	}
+	if json.Unmarshal([]byte(data), &wrapper) == nil && wrapper.Usage != nil {
+		return wrapper.Usage
+	}
+	return nil
 }
 
 func writeError(w http.ResponseWriter, status int, errType, msg string) {

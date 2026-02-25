@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
 	"github.com/yansir/cc-relayer/internal/account"
 	"github.com/yansir/cc-relayer/internal/config"
-	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/proxy"
 )

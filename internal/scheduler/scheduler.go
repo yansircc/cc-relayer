@@ -15,12 +15,12 @@ import (
 
 // Scheduler selects accounts for requests.
 type Scheduler struct {
-	store    *store.Store
+	store    store.Store
 	accounts *account.AccountStore
 	cfg      *config.Config
 }
 
-func New(s *store.Store, as *account.AccountStore, cfg *config.Config) *Scheduler {
+func New(s store.Store, as *account.AccountStore, cfg *config.Config) *Scheduler {
 	return &Scheduler{store: s, accounts: as, cfg: cfg}
 }
 
@@ -138,4 +138,3 @@ func timeOrZero(t *time.Time) time.Time {
 	}
 	return *t
 }
-

@@ -50,14 +50,18 @@ The server listens on `0.0.0.0:3000` by default. Redis must be available at `127
 
 ### 2. Add an account
 
-Open [claude.ai](https://claude.ai) in your browser, then run this in the browser console (F12 → Console):
+```bash
+# Step 1: Generate an auth URL
+curl -X POST https://YOUR_SERVER/admin/accounts/generate-auth-url \
+  -H "x-api-key: YOUR_API_TOKEN"
+# Returns: { "session_id": "...", "auth_url": "https://claude.ai/oauth/authorize?..." }
 
-```js
-fetch("https://YOUR_SERVER/admin/accounts/oauth", {
-  method: "POST",
-  headers: { "Content-Type": "application/json", "x-api-key": "YOUR_API_TOKEN" },
-  body: JSON.stringify({ sessionKey: document.cookie.match(/sessionKey=([^;]+)/)?.[1] })
-}).then(r => r.json()).then(console.log)
+# Step 2: Open auth_url in browser, complete login, copy the callback URL
+
+# Step 3: Exchange the code (email and org info are auto-fetched)
+curl -X POST https://YOUR_SERVER/admin/accounts/exchange-code \
+  -H "Content-Type: application/json" -H "x-api-key: YOUR_API_TOKEN" \
+  -d '{"session_id": "...", "callback_url": "https://platform.claude.com/oauth/code/callback?code=..."}'
 ```
 
 Replace `YOUR_SERVER` and `YOUR_API_TOKEN`. On success you'll see:
@@ -87,7 +91,8 @@ All admin endpoints require the same `API_TOKEN` via `x-api-key` header or `Auth
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/admin/accounts/oauth` | Add/update account via Cookie OAuth |
+| `POST` | `/admin/accounts/generate-auth-url` | Generate browser OAuth URL (returns session_id + auth_url) |
+| `POST` | `/admin/accounts/exchange-code` | Exchange auth code for tokens (session or direct mode) |
 | `GET` | `/admin/accounts` | List all accounts (without tokens) |
 | `DELETE` | `/admin/accounts/{id}` | Delete an account |
 
@@ -102,7 +107,7 @@ cc-relayer implements multiple layers of protection to keep your accounts safe:
 - **Session integrity** — Refuses to silently switch accounts mid-conversation; detects stale sessions and returns clear errors.
 - **Warmup interception** — Responds to warmup requests locally without touching the upstream API.
 - **User ID rewriting** — Deterministically rewrites `metadata.user_id` to match the target account.
-- **Header allowlisting** — Only forwards known-safe headers; proxy-tracking headers are filtered by design.
+- **Header allowlisting** — Only forwards known-safe headers; `x-api-key` and proxy-tracking headers are stripped before reaching upstream.
 - **Error sanitization** — Maps upstream errors to standardized codes, stripping internal details.
 
 ## Scheduling & Fault Tolerance

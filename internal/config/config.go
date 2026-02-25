@@ -11,10 +11,8 @@ type Config struct {
 	Host string
 	Port int
 
-	// Redis
-	RedisAddr     string
-	RedisPassword string
-	RedisDB       int
+	// Database
+	DBPath string
 
 	// Security
 	EncryptionKey string
@@ -24,9 +22,6 @@ type Config struct {
 	ClaudeAPIURL     string
 	ClaudeAPIVersion string
 	ClaudeBetaHeader string
-
-	// Proxy
-	DefaultProxyTimeout time.Duration
 
 	// Scheduling
 	StickySessionTTL    time.Duration
@@ -54,9 +49,7 @@ func Load() *Config {
 		Host: envOr("HOST", "0.0.0.0"),
 		Port: envInt("PORT", 3000),
 
-		RedisAddr:     envOr("REDIS_ADDR", "127.0.0.1:6379"),
-		RedisPassword: envOr("REDIS_PASSWORD", ""),
-		RedisDB:       envInt("REDIS_DB", 0),
+		DBPath: envOr("DB_PATH", "./cc-relayer.db"),
 
 		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
 		StaticToken:   os.Getenv("API_TOKEN"),
@@ -64,8 +57,6 @@ func Load() *Config {
 		ClaudeAPIURL:     envOr("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
 		ClaudeAPIVersion: envOr("CLAUDE_API_VERSION", "2023-06-01"),
 		ClaudeBetaHeader: envOr("CLAUDE_BETA_HEADER", "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"),
-
-		DefaultProxyTimeout: envDuration("DEFAULT_PROXY_TIMEOUT", 60*time.Second),
 
 		StickySessionTTL:    envDuration("STICKY_SESSION_TTL", time.Hour),
 		SessionBindingTTL:   envDuration("SESSION_BINDING_TTL", 24*time.Hour),

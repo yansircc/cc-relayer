@@ -11,10 +11,10 @@ import (
 
 // Manager tracks upstream rate limits from Anthropic response headers.
 type Manager struct {
-	store *store.Store
+	store store.Store
 }
 
-func NewManager(s *store.Store) *Manager {
+func NewManager(s store.Store) *Manager {
 	return &Manager{store: s}
 }
 

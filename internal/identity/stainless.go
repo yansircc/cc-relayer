@@ -28,7 +28,7 @@ var passthroughStainlessKeys = []string{
 
 // BindStainlessHeaders captures x-stainless-* headers from the first request
 // and replays them on all subsequent requests for the same account.
-func BindStainlessHeaders(ctx context.Context, s *store.Store, accountID string, reqHeaders http.Header, outHeaders http.Header) {
+func BindStainlessHeaders(ctx context.Context, s store.Store, accountID string, reqHeaders http.Header, outHeaders http.Header) {
 	// Try to get stored fingerprint
 	stored, err := s.GetStainlessHeaders(ctx, accountID)
 	if err != nil {

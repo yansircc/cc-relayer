@@ -11,70 +11,74 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
 const (
-	oauthRedirectURI = "https://platform.claude.com/oauth/code/callback"
-	oauthScope       = "user:profile user:inference"
-	claudeAIBaseURL  = "https://claude.ai"
+	oauthRedirectURI  = "https://platform.claude.com/oauth/code/callback"
+	oauthScope        = "org:create_api_key user:profile user:inference user:sessions:claude_code"
+	oauthAuthorizeURL = "https://claude.ai/oauth/authorize"
+	claudeAIBaseURL   = "https://claude.ai"
 )
 
-// OAuthResult is the result of a Cookie OAuth flow.
-type OAuthResult struct {
-	AccessToken  string
-	RefreshToken string
-	ExpiresIn    int
-	Email        string
-	OrgUUID      string
-	OrgName      string
+// OAuthSession holds PKCE parameters for a pending manual OAuth flow.
+type OAuthSession struct {
+	CodeVerifier string `json:"code_verifier"`
+	State        string `json:"state"`
 }
 
-// CookieOAuth completes the full OAuth flow using a sessionKey cookie.
-// Step 1: GET /api/organizations → pick best org
-// Step 2: POST /v1/oauth/{org}/authorize → get authorization code
-// Step 3: POST token endpoint → exchange code for tokens
-func CookieOAuth(ctx context.Context, sessionKey string) (*OAuthResult, error) {
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	// Step 1: get organizations
-	orgUUID, email, orgName, err := fetchOrganization(ctx, client, sessionKey)
-	if err != nil {
-		return nil, fmt.Errorf("fetch organization: %w", err)
-	}
-
-	// PKCE
+// GenerateAuthURL creates a PKCE-secured authorization URL for manual browser-based OAuth.
+func GenerateAuthURL() (authURL string, session OAuthSession, err error) {
 	verifier, challenge, err := generatePKCE()
 	if err != nil {
-		return nil, fmt.Errorf("generate PKCE: %w", err)
+		return "", OAuthSession{}, fmt.Errorf("generate PKCE: %w", err)
 	}
 	state := generateState()
 
-	// Step 2: authorize
-	code, err := authorize(ctx, client, sessionKey, orgUUID, verifier, challenge, state)
-	if err != nil {
-		return nil, fmt.Errorf("authorize: %w", err)
+	params := url.Values{
+		"code":                  {"true"},
+		"client_id":             {oauthClientID},
+		"response_type":         {"code"},
+		"redirect_uri":          {oauthRedirectURI},
+		"scope":                 {oauthScope},
+		"state":                 {state},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
 	}
 
-	// Step 3: exchange code for tokens
-	tokens, err := exchangeCode(ctx, client, code, verifier, state)
-	if err != nil {
-		return nil, fmt.Errorf("exchange code: %w", err)
-	}
-
-	return &OAuthResult{
-		AccessToken:  tokens.AccessToken,
-		RefreshToken: tokens.RefreshToken,
-		ExpiresIn:    tokens.ExpiresIn,
-		Email:        email,
-		OrgUUID:      orgUUID,
-		OrgName:      orgName,
+	return oauthAuthorizeURL + "?" + params.Encode(), OAuthSession{
+		CodeVerifier: verifier,
+		State:        state,
 	}, nil
+}
+
+// ExtractCodeFromCallback extracts the authorization code from a callback URL or raw code string.
+func ExtractCodeFromCallback(callbackURL string) string {
+	s := strings.TrimSpace(callbackURL)
+	if s == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(s)
+	if err != nil || parsed.Scheme == "" {
+		// Raw code input may include URL fragments/params like "code#state" or "code&..."
+		if i := strings.Index(s, "#"); i >= 0 {
+			s = s[:i]
+		}
+		if i := strings.Index(s, "&"); i >= 0 {
+			s = s[:i]
+		}
+		if i := strings.Index(s, "?"); i >= 0 {
+			s = s[:i]
+		}
+		s = strings.TrimPrefix(s, "code=")
+		return strings.TrimSpace(s)
+	}
+	if code := parsed.Query().Get("code"); code != "" {
+		return code
+	}
+	return strings.TrimSpace(s)
 }
 
 type orgResponse struct {
@@ -84,126 +88,24 @@ type orgResponse struct {
 	Capabilities []string `json:"capabilities"`
 }
 
-func fetchOrganization(ctx context.Context, client *http.Client, sessionKey string) (uuid, email, name string, err error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", claudeAIBaseURL+"/api/organizations", nil)
-	if err != nil {
-		return "", "", "", err
-	}
-	req.Header.Set("Cookie", "sessionKey="+sessionKey)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", "", "", fmt.Errorf("organizations API returned %d: %s", resp.StatusCode, truncate(body, 200))
-	}
-
-	var orgs []orgResponse
-	if err := json.Unmarshal(body, &orgs); err != nil {
-		return "", "", "", fmt.Errorf("parse organizations: %w", err)
-	}
-	if len(orgs) == 0 {
-		return "", "", "", fmt.Errorf("no organizations found")
-	}
-
-	// Pick the org with "chat" capability and most capabilities
-	best := -1
-	bestCaps := -1
-	for i, org := range orgs {
-		hasChat := false
-		for _, cap := range org.Capabilities {
-			if cap == "chat" {
-				hasChat = true
-				break
-			}
-		}
-		if hasChat && len(org.Capabilities) > bestCaps {
-			best = i
-			bestCaps = len(org.Capabilities)
-		}
-	}
-	if best == -1 {
-		// Fallback to first org
-		best = 0
-	}
-
-	return orgs[best].UUID, orgs[best].EmailAddress, orgs[best].Name, nil
+// ExchangeCodeResult holds the tokens returned from an authorization code exchange.
+type ExchangeCodeResult struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    int
 }
 
-type authorizeRequest struct {
-	ResponseType        string `json:"response_type"`
-	ClientID            string `json:"client_id"`
-	OrganizationUUID    string `json:"organization_uuid"`
-	RedirectURI         string `json:"redirect_uri"`
-	Scope               string `json:"scope"`
-	State               string `json:"state"`
-	CodeChallenge       string `json:"code_challenge"`
-	CodeChallengeMethod string `json:"code_challenge_method"`
-}
-
-type authorizeResponse struct {
-	RedirectURI string `json:"redirect_uri"`
-}
-
-func authorize(ctx context.Context, client *http.Client, sessionKey, orgUUID, verifier, challenge, state string) (string, error) {
-	reqBody := authorizeRequest{
-		ResponseType:        "code",
-		ClientID:            oauthClientID,
-		OrganizationUUID:    orgUUID,
-		RedirectURI:         oauthRedirectURI,
-		Scope:               oauthScope,
-		State:               state,
-		CodeChallenge:       challenge,
-		CodeChallengeMethod: "S256",
-	}
-	bodyBytes, _ := json.Marshal(reqBody)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", claudeAIBaseURL+"/v1/oauth/"+orgUUID+"/authorize", bytes.NewReader(bodyBytes))
+// ExchangeCode exchanges an authorization code for tokens at the Anthropic token endpoint.
+func ExchangeCode(ctx context.Context, code, verifier, state string) (*ExchangeCodeResult, error) {
+	resp, err := exchangeCode(ctx, &http.Client{Timeout: 30 * time.Second}, code, verifier, state)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	req.Header.Set("Cookie", "sessionKey="+sessionKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("authorize API returned %d: %s", resp.StatusCode, truncate(body, 200))
-	}
-
-	var authResp authorizeResponse
-	if err := json.Unmarshal(body, &authResp); err != nil {
-		return "", fmt.Errorf("parse authorize response: %w", err)
-	}
-
-	parsed, err := url.Parse(authResp.RedirectURI)
-	if err != nil {
-		return "", fmt.Errorf("parse redirect_uri: %w", err)
-	}
-	code := parsed.Query().Get("code")
-	if code == "" {
-		return "", fmt.Errorf("no code in redirect_uri: %s", authResp.RedirectURI)
-	}
-	return code, nil
+	return &ExchangeCodeResult{
+		AccessToken:  resp.AccessToken,
+		RefreshToken: resp.RefreshToken,
+		ExpiresIn:    resp.ExpiresIn,
+	}, nil
 }
 
 func exchangeCode(ctx context.Context, client *http.Client, code, verifier, state string) (*tokenResponse, error) {
@@ -250,6 +152,62 @@ func exchangeCode(ctx context.Context, client *http.Client, code, verifier, stat
 	return &tokenResp, nil
 }
 
+// FetchOrgWithToken fetches organization info using an OAuth access token.
+// Used after manual OAuth code exchange to auto-populate account email/org.
+func FetchOrgWithToken(ctx context.Context, accessToken string) (uuid, email, name string, err error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", claudeAIBaseURL+"/api/organizations", nil)
+	if err != nil {
+		return "", "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", "", "", fmt.Errorf("organizations API returned %d: %s", resp.StatusCode, truncate(body, 200))
+	}
+
+	var orgs []orgResponse
+	if err := json.Unmarshal(body, &orgs); err != nil {
+		return "", "", "", fmt.Errorf("parse organizations: %w", err)
+	}
+	if len(orgs) == 0 {
+		return "", "", "", fmt.Errorf("no organizations found")
+	}
+
+	best := -1
+	bestCaps := -1
+	for i, org := range orgs {
+		hasChat := false
+		for _, cap := range org.Capabilities {
+			if cap == "chat" {
+				hasChat = true
+				break
+			}
+		}
+		if hasChat && len(org.Capabilities) > bestCaps {
+			best = i
+			bestCaps = len(org.Capabilities)
+		}
+	}
+	if best == -1 {
+		best = 0
+	}
+
+	return orgs[best].UUID, orgs[best].EmailAddress, orgs[best].Name, nil
+}
+
 // --- PKCE helpers ---
 
 func generatePKCE() (verifier, challenge string, err error) {
@@ -264,7 +222,9 @@ func generatePKCE() (verifier, challenge string, err error) {
 }
 
 func generateState() string {
-	b := make([]byte, 16)
+	// Match Node relay / claude-code-login behavior (32 bytes -> ~43 chars base64url).
+	// Some upstream validators appear stricter and reject short state values.
+	b := make([]byte, 32)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/yansir/cc-relayer/internal/account"
 	"github.com/yansir/cc-relayer/internal/config"
+	"github.com/yansir/cc-relayer/internal/events"
 	"github.com/yansir/cc-relayer/internal/server"
 	"github.com/yansir/cc-relayer/internal/store"
 	"github.com/yansir/cc-relayer/internal/transport"
@@ -21,7 +22,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup logging
+	// Setup logging with ring buffer handler
 	level := slog.LevelInfo
 	switch cfg.LogLevel {
 	case "debug":
@@ -31,17 +32,18 @@ func main() {
 	case "error":
 		level = slog.LevelError
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	logHandler := events.NewLogHandler(level, 1000)
+	slog.SetDefault(slog.New(logHandler))
 	slog.Info("cc-relayer starting", "version", version)
 
-	// Connect to Redis
-	s, err := store.New(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+	// Open SQLite database
+	s, err := store.New(cfg.DBPath)
 	if err != nil {
-		slog.Error("redis connection failed", "error", err)
+		slog.Error("database init failed", "error", err)
 		os.Exit(1)
 	}
 	defer s.Close()
-	slog.Info("redis connected", "addr", cfg.RedisAddr)
+	slog.Info("database ready", "path", cfg.DBPath)
 
 	// Initialize crypto (derive keys at startup)
 	crypto := account.NewCrypto(cfg.EncryptionKey)
@@ -55,8 +57,11 @@ func main() {
 	tm := transport.NewManager(cfg)
 	defer tm.Close()
 
+	// Initialize event bus
+	bus := events.NewBus(200)
+
 	// Start server
-	srv := server.New(cfg, s, crypto, tm)
+	srv := server.New(cfg, s, crypto, tm, bus, logHandler, version)
 	if err := srv.Run(); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
