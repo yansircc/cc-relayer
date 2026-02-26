@@ -10,24 +10,21 @@ import (
 
 	"github.com/yansir/cc-relayer/internal/account"
 	"github.com/yansir/cc-relayer/internal/config"
-	"github.com/yansir/cc-relayer/internal/store"
 )
 
 // Scheduler selects accounts for requests.
 type Scheduler struct {
-	store    store.Store
 	accounts *account.AccountStore
 	cfg      *config.Config
 }
 
-func New(s store.Store, as *account.AccountStore, cfg *config.Config) *Scheduler {
-	return &Scheduler{store: s, accounts: as, cfg: cfg}
+func New(as *account.AccountStore, cfg *config.Config) *Scheduler {
+	return &Scheduler{accounts: as, cfg: cfg}
 }
 
 // SelectOptions provides context for account selection.
 type SelectOptions struct {
 	BoundAccountID string   // API Key bound account
-	SessionHash    string   // For sticky session lookup
 	IsOpusRequest  bool     // Whether this is an Opus model request
 	ExcludeIDs     []string // Accounts to skip (failed on this request)
 }
@@ -46,20 +43,7 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 		}
 	}
 
-	// 2. Sticky session — check Redis for existing binding
-	if opts.SessionHash != "" {
-		accountID, err := s.store.GetStickySession(ctx, opts.SessionHash)
-		if err == nil && accountID != "" && !slices.Contains(opts.ExcludeIDs, accountID) {
-			acct, err := s.accounts.Get(ctx, accountID)
-			if err == nil && acct != nil && s.isAvailable(acct, opts) {
-				// Renew sticky session TTL
-				_ = s.store.SetStickySession(ctx, opts.SessionHash, accountID, s.cfg.StickySessionTTL)
-				return acct, nil
-			}
-		}
-	}
-
-	// 3. Pool selection — filter, sort, pick best
+	// 2. Pool selection — filter, sort, pick best
 	all, err := s.accounts.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
@@ -113,11 +97,6 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 
 	selected := scoredCandidates[0].acct
 
-	// Bind to sticky session
-	if opts.SessionHash != "" {
-		_ = s.store.SetStickySession(ctx, opts.SessionHash, selected.ID, s.cfg.StickySessionTTL)
-	}
-
 	slog.Debug("account selected", "accountId", selected.ID, "email", selected.Email, "priority", scoredCandidates[0].priority, "mode", selected.PriorityMode)
 	return selected, nil
 }
@@ -134,13 +113,6 @@ func (s *Scheduler) isAvailable(acct *account.Account, opts SelectOptions) bool 
 	// Overloaded check
 	if acct.OverloadedUntil != nil && time.Now().Before(*acct.OverloadedUntil) {
 		return false
-	}
-
-	// 5-hour window check
-	if acct.FiveHourAutoStopped {
-		if acct.SessionWindowEnd != nil && time.Now().Before(acct.SessionWindowEnd.Add(time.Minute)) {
-			return false
-		}
 	}
 
 	// Opus rate limit check

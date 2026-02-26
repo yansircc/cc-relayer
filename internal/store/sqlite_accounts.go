@@ -16,8 +16,7 @@ import (
 const accountCols = `id, email, status, schedulable, priority, priority_mode, error_message,
 	refresh_token_enc, access_token_enc, expires_at, created_at,
 	last_used_at, last_refresh_at, proxy_json, ext_info_json,
-	five_hour_status, five_hour_auto_stopped, five_hour_stopped_at,
-	session_window_start, session_window_end, auto_stop_on_warning,
+	five_hour_status,
 	opus_rate_limit_end_at, overloaded_at, overloaded_until, rate_limited_at,
 	five_hour_util, five_hour_reset, seven_day_util, seven_day_reset`
 
@@ -27,11 +26,8 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		refreshEnc, accessEnc               string
 		proxyJSON, extInfoJSON, fhStatus    string
 		sched, prio                         int
-		fhAutoStopped, autoStop             int
 		expiresAt, createdAt                int64
 		lastUsedAt, lastRefreshAt           sql.NullInt64
-		fhStoppedAt                         sql.NullInt64
-		winStart, winEnd                    sql.NullInt64
 		opusEnd                             sql.NullInt64
 		olAt, olUntil                       sql.NullInt64
 		rlAt                                sql.NullInt64
@@ -42,8 +38,7 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		&id, &email, &status, &sched, &prio, &priMode, &errMsg,
 		&refreshEnc, &accessEnc, &expiresAt, &createdAt,
 		&lastUsedAt, &lastRefreshAt, &proxyJSON, &extInfoJSON,
-		&fhStatus, &fhAutoStopped, &fhStoppedAt,
-		&winStart, &winEnd, &autoStop,
+		&fhStatus,
 		&opusEnd, &olAt, &olUntil, &rlAt,
 		&fhUtil, &fhReset, &sdUtil, &sdReset,
 	)
@@ -70,8 +65,6 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		"proxy":               proxyJSON,
 		"extInfo":             extInfoJSON,
 		"fiveHourStatus":      fhStatus,
-		"fiveHourAutoStopped": boolStr(fhAutoStopped),
-		"autoStopOnWarning":   boolStr(autoStop),
 		"fiveHourUtil":        strconv.FormatFloat(fhUtil, 'f', -1, 64),
 		"fiveHourReset":       strconv.FormatInt(fhReset, 10),
 		"sevenDayUtil":        strconv.FormatFloat(sdUtil, 'f', -1, 64),
@@ -79,9 +72,6 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 	}
 	setTimeField(m, "lastUsedAt", lastUsedAt)
 	setTimeField(m, "lastRefreshAt", lastRefreshAt)
-	setTimeField(m, "fiveHourStoppedAt", fhStoppedAt)
-	setTimeField(m, "sessionWindowStart", winStart)
-	setTimeField(m, "sessionWindowEnd", winEnd)
 	setTimeField(m, "opusRateLimitEndAt", opusEnd)
 	setTimeField(m, "overloadedAt", olAt)
 	setTimeField(m, "overloadedUntil", olUntil)

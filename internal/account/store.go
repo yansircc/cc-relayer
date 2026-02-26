@@ -29,16 +29,13 @@ type Account struct {
 	Proxy *ProxyConfig `json:"proxy,omitempty"`
 
 	// Rate limit state
-	FiveHourStatus      string     `json:"fiveHourStatus,omitempty"`
-	FiveHourUtil        float64    `json:"fiveHourUtil,omitempty"`
-	FiveHourReset       int64      `json:"fiveHourReset,omitempty"`
-	SevenDayUtil        float64    `json:"sevenDayUtil,omitempty"`
-	SevenDayReset       int64      `json:"sevenDayReset,omitempty"`
-	SessionWindowStart  *time.Time `json:"sessionWindowStart,omitempty"`
-	SessionWindowEnd    *time.Time `json:"sessionWindowEnd,omitempty"`
-	FiveHourAutoStopped bool       `json:"fiveHourAutoStopped,omitempty"`
-	OpusRateLimitEndAt  *time.Time `json:"opusRateLimitEndAt,omitempty"`
-	OverloadedUntil     *time.Time `json:"overloadedUntil,omitempty"`
+	FiveHourStatus     string     `json:"fiveHourStatus,omitempty"`
+	FiveHourUtil       float64    `json:"fiveHourUtil,omitempty"`
+	FiveHourReset      int64      `json:"fiveHourReset,omitempty"`
+	SevenDayUtil       float64    `json:"sevenDayUtil,omitempty"`
+	SevenDayReset      int64      `json:"sevenDayReset,omitempty"`
+	OpusRateLimitEndAt *time.Time `json:"opusRateLimitEndAt,omitempty"`
+	OverloadedUntil    *time.Time `json:"overloadedUntil,omitempty"`
 
 	// Priority mode
 	PriorityMode string `json:"priorityMode,omitempty"` // "auto" or "manual"
@@ -225,8 +222,7 @@ func (as *AccountStore) fromMap(m map[string]string) *Account {
 		FiveHourUtil:        atof(m["fiveHourUtil"]),
 		FiveHourReset:       atoi64(m["fiveHourReset"], 0),
 		SevenDayUtil:        atof(m["sevenDayUtil"]),
-		SevenDayReset:       atoi64(m["sevenDayReset"], 0),
-		FiveHourAutoStopped: m["fiveHourAutoStopped"] == "true",
+		SevenDayReset:  atoi64(m["sevenDayReset"], 0),
 	}
 
 	if t, err := time.Parse(time.RFC3339, m["createdAt"]); err == nil {
@@ -237,12 +233,6 @@ func (as *AccountStore) fromMap(m map[string]string) *Account {
 	}
 	if t, err := time.Parse(time.RFC3339, m["lastRefreshAt"]); err == nil {
 		a.LastRefreshAt = &t
-	}
-	if t, err := time.Parse(time.RFC3339, m["sessionWindowStart"]); err == nil {
-		a.SessionWindowStart = &t
-	}
-	if t, err := time.Parse(time.RFC3339, m["sessionWindowEnd"]); err == nil {
-		a.SessionWindowEnd = &t
 	}
 	if t, err := time.Parse(time.RFC3339, m["opusRateLimitEndAt"]); err == nil {
 		a.OpusRateLimitEndAt = &t

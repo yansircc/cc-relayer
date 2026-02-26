@@ -47,7 +47,7 @@ func New(cfg *config.Config, s store.Store, crypto *account.Crypto, tm *transpor
 	as := account.NewAccountStore(s, crypto)
 	tokMgr := account.NewTokenManager(s, as, cfg, tm)
 	authMw := auth.NewMiddleware(cfg.StaticToken, s)
-	sched := scheduler.New(s, as, cfg)
+	sched := scheduler.New(as, cfg)
 	trans := identity.NewTransformer(s, cfg)
 	rl := ratelimit.NewManager(s)
 	r := relay.New(s, as, tokMgr, sched, trans, rl, cfg, tm)

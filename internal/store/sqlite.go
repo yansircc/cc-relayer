@@ -26,7 +26,6 @@ type bindingEntry struct {
 // for ephemeral data (sticky sessions, bindings, stainless fingerprints, locks).
 type SQLiteStore struct {
 	db            *sql.DB
-	sticky        *TTLMap[string]
 	bindings      *TTLMap[bindingEntry]
 	oauthSessions *TTLMap[string]
 	stainless     sync.Map // accountID → headersJSON
@@ -61,7 +60,6 @@ func New(dbPath string) (*SQLiteStore, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &SQLiteStore{
 		db:            db,
-		sticky:        NewTTLMap[string](),
 		bindings:      NewTTLMap[bindingEntry](),
 		oauthSessions: NewTTLMap[string](),
 		cleanupCancel: cancel,
@@ -82,7 +80,6 @@ func New(dbPath string) (*SQLiteStore, error) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.sticky.Cleanup()
 				s.bindings.Cleanup()
 				s.oauthSessions.Cleanup()
 			}
@@ -165,11 +162,6 @@ var fieldMap = map[string]colInfo{
 	"proxy":               {"proxy_json", sqlStr},
 	"extInfo":             {"ext_info_json", sqlStr},
 	"fiveHourStatus":      {"five_hour_status", sqlStr},
-	"fiveHourAutoStopped": {"five_hour_auto_stopped", sqlBool},
-	"fiveHourStoppedAt":   {"five_hour_stopped_at", sqlTimeNullable},
-	"sessionWindowStart":  {"session_window_start", sqlTimeNullable},
-	"sessionWindowEnd":    {"session_window_end", sqlTimeNullable},
-	"autoStopOnWarning":   {"auto_stop_on_warning", sqlBool},
 	"opusRateLimitEndAt":  {"opus_rate_limit_end_at", sqlTimeNullable},
 	"overloadedAt":        {"overloaded_at", sqlTimeNullable},
 	"overloadedUntil":     {"overloaded_until", sqlTimeNullable},
@@ -219,23 +211,6 @@ func boolStr(v int) string {
 		return "true"
 	}
 	return "false"
-}
-
-// ---------------------------------------------------------------------------
-// Sticky session (in-memory)
-// ---------------------------------------------------------------------------
-
-func (s *SQLiteStore) GetStickySession(_ context.Context, hash string) (string, error) {
-	v, ok := s.sticky.Get(hash)
-	if !ok {
-		return "", nil
-	}
-	return v, nil
-}
-
-func (s *SQLiteStore) SetStickySession(_ context.Context, hash, accountID string, ttl time.Duration) error {
-	s.sticky.Set(hash, accountID, ttl)
-	return nil
 }
 
 // ---------------------------------------------------------------------------

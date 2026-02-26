@@ -19,10 +19,6 @@ type Store interface {
 	DeleteAccount(ctx context.Context, id string) error
 	ListAccountIDs(ctx context.Context) ([]string, error)
 
-	// Sticky session (in-memory with TTL)
-	GetStickySession(ctx context.Context, hash string) (string, error)
-	SetStickySession(ctx context.Context, hash, accountID string, ttl time.Duration) error
-
 	// Session binding (in-memory with TTL)
 	GetSessionBinding(ctx context.Context, sessionUUID string) (map[string]string, error)
 	SetSessionBinding(ctx context.Context, sessionUUID, accountID string, ttl time.Duration) error
