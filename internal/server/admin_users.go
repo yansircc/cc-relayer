@@ -175,12 +175,21 @@ func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	usage, _ := s.store.QueryUsagePeriods(ctx, id)
-	modelUsage, _ := s.store.QueryModelUsage(ctx, id)
-	recentRequests, _, _ := s.store.QueryRequestLogs(ctx, store.RequestLogQuery{
+	usage, err := s.store.QueryUsagePeriods(ctx, id)
+	if err != nil {
+		slog.Warn("user detail: query usage periods failed", "error", err, "userId", id)
+	}
+	modelUsage, err := s.store.QueryModelUsage(ctx, id)
+	if err != nil {
+		slog.Warn("user detail: query model usage failed", "error", err, "userId", id)
+	}
+	recentRequests, _, err := s.store.QueryRequestLogs(ctx, store.RequestLogQuery{
 		UserID: id,
 		Limit:  20,
 	})
+	if err != nil {
+		slog.Warn("user detail: query request logs failed", "error", err, "userId", id)
+	}
 
 	if usage == nil {
 		usage = []store.UsagePeriod{}

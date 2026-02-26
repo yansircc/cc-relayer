@@ -140,6 +140,8 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 	// Retry loop: try up to MaxRetryAccounts+1 different accounts
 	var excludeIDs []string
 	var lastErr error
+	var lastUpstreamStatus int
+	var lastUpstreamBody []byte
 	var forbiddenRetries int
 
 	for attempt := 0; attempt <= r.cfg.MaxRetryAccounts; attempt++ {
@@ -176,12 +178,21 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 
 		// Apply identity transformations (re-parse body each attempt for clean state)
 		var attemptBody map[string]interface{}
-		json.Unmarshal(rawBody, &attemptBody)
+		if err := json.Unmarshal(rawBody, &attemptBody); err != nil {
+			slog.Error("re-parse body failed", "error", err)
+			lastErr = fmt.Errorf("body re-parse: %w", err)
+			break
+		}
 
 		result := r.transformer.Transform(ctx, attemptBody, req.Header, acct)
 
 		// Build upstream request
-		upstreamBody, _ := json.Marshal(result.Body)
+		upstreamBody, err := json.Marshal(result.Body)
+		if err != nil {
+			slog.Error("marshal upstream body", "error", err, "accountId", acct.ID)
+			lastErr = fmt.Errorf("marshal body: %w", err)
+			break
+		}
 
 		upstreamURL, err := appendRawQuery(r.cfg.ClaudeAPIURL, req.URL.RawQuery)
 		if err != nil {
@@ -222,7 +233,11 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 			errBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 
-			r.handleUpstreamError(ctx, acct, resp, errBody, isOpus)
+			r.handleUpstreamError(ctx, acct, resp, errBody, model, isOpus)
+
+			// Preserve last upstream error for client-facing fallback
+			lastUpstreamStatus = resp.StatusCode
+			lastUpstreamBody = errBody
 
 			// 403 may be transient — retry same account up to 2x before switching
 			if resp.StatusCode == 403 {
@@ -243,6 +258,11 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 			errBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			r.rateLimit.CaptureHeaders(ctx, acct.ID, resp.Header)
+
+			slog.Warn("upstream non-retriable error",
+				"status", resp.StatusCode, "accountId", acct.ID, "model", model,
+				"body", truncate(string(errBody), 500),
+				"rlHeaders", collectRateLimitHeaders(resp.Header))
 
 			if isStream {
 				sanitizedStatus, _ := SanitizeError(resp.StatusCode, errBody)
@@ -306,9 +326,22 @@ func (r *Relay) Handle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// All attempts failed
+	// All attempts failed — return last upstream error if available, otherwise generic 503
 	if lastErr != nil {
 		slog.Error("all relay attempts failed", "error", lastErr)
+	}
+	if lastUpstreamBody != nil {
+		sanitizedStatus, sanitizedBody := SanitizeError(lastUpstreamStatus, lastUpstreamBody)
+		if isStream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(sanitizedStatus)
+			fmt.Fprint(w, SanitizeSSEError(lastUpstreamStatus, lastUpstreamBody))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(sanitizedStatus)
+			w.Write(sanitizedBody)
+		}
+		return
 	}
 	writeError(w, http.StatusServiceUnavailable, "overloaded_error", "no available accounts")
 }
@@ -377,7 +410,10 @@ func (r *Relay) jsonResponse(w http.ResponseWriter, resp *http.Response) *usageD
 	return parseUsage(string(body))
 }
 
-func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, resp *http.Response, errBody []byte, isOpus bool) {
+func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, resp *http.Response, errBody []byte, model string, isOpus bool) {
+	// Collect rate-limit headers for diagnostics
+	rlHeaders := collectRateLimitHeaders(resp.Header)
+
 	switch resp.StatusCode {
 	case 529:
 		until := time.Now().Add(r.cfg.ErrorPause529).UTC().Format(time.RFC3339)
@@ -385,7 +421,8 @@ func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, 
 			"overloadedAt":    time.Now().UTC().Format(time.RFC3339),
 			"overloadedUntil": until,
 		})
-		slog.Warn("account overloaded (529)", "accountId", acct.ID)
+		slog.Warn("account overloaded (529)", "accountId", acct.ID, "model", model,
+			"body", truncate(string(errBody), 500), "rlHeaders", rlHeaders)
 
 	case 429:
 		r.rateLimit.CaptureHeaders(ctx, acct.ID, resp.Header)
@@ -413,12 +450,13 @@ func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, 
 				}
 			}
 		}
-		slog.Warn("account rate limited (429)", "accountId", acct.ID, "until", until.UTC())
+		slog.Warn("account rate limited (429)", "accountId", acct.ID, "model", model,
+			"until", until.UTC(), "retryAfter", resp.Header.Get("Retry-After"),
+			"body", truncate(string(errBody), 500), "rlHeaders", rlHeaders)
 
 	case 403:
 		bodyStr := string(errBody)
 		if banSignalPattern.MatchString(bodyStr) {
-			// Ban signal detected — mark blocked and pause for 30 minutes
 			until := time.Now().Add(r.cfg.ErrorPause401).UTC().Format(time.RFC3339)
 			_ = r.accounts.Update(ctx, acct.ID, map[string]string{
 				"status":          "blocked",
@@ -426,15 +464,16 @@ func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, 
 				"schedulable":     "false",
 				"overloadedUntil": until,
 			})
-			slog.Error("ban signal detected (403)", "accountId", acct.ID, "body", truncate(bodyStr, 200))
+			slog.Error("ban signal detected (403)", "accountId", acct.ID, "model", model,
+				"body", truncate(bodyStr, 500), "rlHeaders", rlHeaders)
 		} else {
-			// Generic 403 — pause for 10 minutes to avoid rapid retries
 			until := time.Now().Add(r.cfg.ErrorPause403).UTC().Format(time.RFC3339)
 			_ = r.accounts.Update(ctx, acct.ID, map[string]string{
 				"overloadedAt":    time.Now().UTC().Format(time.RFC3339),
 				"overloadedUntil": until,
 			})
-			slog.Warn("account forbidden (403)", "accountId", acct.ID)
+			slog.Warn("account forbidden (403)", "accountId", acct.ID, "model", model,
+				"body", truncate(bodyStr, 500), "rlHeaders", rlHeaders)
 		}
 
 	case 401:
@@ -444,13 +483,25 @@ func (r *Relay) handleUpstreamError(ctx context.Context, acct *account.Account, 
 			"errorMessage":    "upstream 401: authentication failed",
 			"overloadedUntil": until,
 		})
-		// Trigger async token refresh
 		go func() {
 			bgCtx := context.Background()
 			_, _ = r.tokens.ForceRefresh(bgCtx, acct.ID)
 		}()
-		slog.Warn("account auth failed (401)", "accountId", acct.ID)
+		slog.Warn("account auth failed (401)", "accountId", acct.ID, "model", model,
+			"body", truncate(string(errBody), 500), "rlHeaders", rlHeaders)
 	}
+}
+
+// collectRateLimitHeaders extracts all anthropic-ratelimit-* and retry-after headers for diagnostics.
+func collectRateLimitHeaders(h http.Header) map[string]string {
+	out := make(map[string]string)
+	for key, vals := range h {
+		lower := strings.ToLower(key)
+		if strings.HasPrefix(lower, "anthropic-ratelimit-") || lower == "retry-after" {
+			out[key] = strings.Join(vals, ", ")
+		}
+	}
+	return out
 }
 
 func shouldRetry(statusCode int) bool {

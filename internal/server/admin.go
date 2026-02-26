@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -80,10 +81,16 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	uptime := fmt.Sprintf("%dd %dh %dm", days, hours, mins)
 
 	// Usage periods
-	usage, _ := s.store.QueryUsagePeriods(ctx, "")
+	usage, err := s.store.QueryUsagePeriods(ctx, "")
+	if err != nil {
+		slog.Warn("dashboard: query usage periods failed", "error", err)
+	}
 
 	// Accounts with utilization from response headers
-	acctList, _ := s.accounts.List(ctx)
+	acctList, err := s.accounts.List(ctx)
+	if err != nil {
+		slog.Warn("dashboard: list accounts failed", "error", err)
+	}
 
 	type accountView struct {
 		ID              string     `json:"id"`
@@ -128,8 +135,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Users with total cost
-	users, _ := s.store.ListUsers(ctx)
-	userCosts, _ := s.store.QueryUserTotalCosts(ctx)
+	users, err := s.store.ListUsers(ctx)
+	if err != nil {
+		slog.Warn("dashboard: list users failed", "error", err)
+	}
+	userCosts, err := s.store.QueryUserTotalCosts(ctx)
+	if err != nil {
+		slog.Warn("dashboard: query user costs failed", "error", err)
+	}
 
 	type userView struct {
 		ID           string     `json:"id"`
@@ -210,7 +223,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("writeJSON encode failed", "error", err)
+	}
 }
 
 func writeAdminError(w http.ResponseWriter, status int, errType, msg string) {

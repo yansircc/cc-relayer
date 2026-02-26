@@ -38,7 +38,9 @@ func BindStainlessHeaders(ctx context.Context, s store.Store, accountID string, 
 	if stored != "" {
 		// Apply stored fingerprint
 		var headers map[string]string
-		if json.Unmarshal([]byte(stored), &headers) == nil {
+		if err := json.Unmarshal([]byte(stored), &headers); err != nil {
+			slog.Warn("stainless: corrupt stored headers", "error", err, "accountId", accountID)
+		} else {
 			for k, v := range headers {
 				outHeaders.Set(k, v)
 			}
@@ -61,10 +63,14 @@ func BindStainlessHeaders(ctx context.Context, s store.Store, accountID string, 
 			}
 			if !ok {
 				// Another request beat us — re-read and apply stored version
-				stored, _ := s.GetStainlessHeaders(ctx, accountID)
-				if stored != "" {
+				stored, err := s.GetStainlessHeaders(ctx, accountID)
+				if err != nil {
+					slog.Warn("stainless: re-read headers failed", "error", err, "accountId", accountID)
+				} else if stored != "" {
 					var headers map[string]string
-					if json.Unmarshal([]byte(stored), &headers) == nil {
+					if err := json.Unmarshal([]byte(stored), &headers); err != nil {
+						slog.Warn("stainless: corrupt re-read headers", "error", err, "accountId", accountID)
+					} else {
 						for k, v := range headers {
 							outHeaders.Set(k, v)
 						}

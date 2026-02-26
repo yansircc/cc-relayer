@@ -27,11 +27,11 @@
  */
 declare module '$env/static/private' {
 	export const MANPATH: string;
-	export const _VOLTA_TOOL_RECURSION: string;
+	export const __MISE_DIFF: string;
 	export const GHOSTTY_RESOURCES_DIR: string;
 	export const NoDefaultCurrentDirectoryInExePath: string;
-	export const CLAUDE_CODE_ENTRYPOINT: string;
 	export const TERM_PROGRAM: string;
+	export const CLAUDE_CODE_ENTRYPOINT: string;
 	export const NODE: string;
 	export const INIT_CWD: string;
 	export const SHELL: string;
@@ -41,13 +41,12 @@ declare module '$env/static/private' {
 	export const npm_config_global_prefix: string;
 	export const CCC_DEFAULT_TOKEN: string;
 	export const TERM_PROGRAM_VERSION: string;
-	export const VOLTA_HOME: string;
 	export const ZPFX: string;
 	export const COLOR: string;
 	export const npm_config_noproxy: string;
 	export const npm_config_local_prefix: string;
-	export const GIT_EDITOR: string;
 	export const PMSPEC: string;
+	export const GIT_EDITOR: string;
 	export const USER: string;
 	export const COMMAND_MODE: string;
 	export const npm_config_globalconfig: string;
@@ -56,13 +55,12 @@ declare module '$env/static/private' {
 	export const __CF_USER_TEXT_ENCODING: string;
 	export const npm_execpath: string;
 	export const FZF_DEFAULT_OPTS: string;
-	export const CCC_GLM_TOKEN: string;
 	export const CCC_KIMI_TOKEN: string;
+	export const CCC_GLM_TOKEN: string;
 	export const PATH: string;
 	export const npm_package_json: string;
-	export const _: string;
-	export const GHOSTTY_SHELL_FEATURES: string;
 	export const LaunchInstanceID: string;
+	export const GHOSTTY_SHELL_FEATURES: string;
 	export const npm_config_userconfig: string;
 	export const npm_config_init_module: string;
 	export const __CFBundleIdentifier: string;
@@ -85,11 +83,12 @@ declare module '$env/static/private' {
 	export const HOME: string;
 	export const SHLVL: string;
 	export const ANTHROPIC_BASE_URL: string;
+	export const __MISE_ORIG_PATH: string;
 	export const TERMINFO: string;
-	export const npm_config_loglevel: string;
-	export const HOMEBREW_PREFIX: string;
 	export const ZSH_CACHE_DIR: string;
+	export const HOMEBREW_PREFIX: string;
 	export const HTTP_PROXY: string;
+	export const MISE_SHELL: string;
 	export const CRS_OAI_KEY: string;
 	export const PROMPT: string;
 	export const npm_config_cache: string;
@@ -98,17 +97,20 @@ declare module '$env/static/private' {
 	export const npm_lifecycle_script: string;
 	export const FZF_CTRL_T_OPTS: string;
 	export const XDG_DATA_DIRS: string;
-	export const COREPACK_ENABLE_AUTO_PIN: string;
 	export const GHOSTTY_BIN_DIR: string;
+	export const COREPACK_ENABLE_AUTO_PIN: string;
 	export const npm_config_user_agent: string;
 	export const CCC_BACKUP_TOKEN: string;
-	export const HOMEBREW_CELLAR: string;
+	export const __MISE_SESSION: string;
 	export const INFOPATH: string;
-	export const CLAUDECODE: string;
+	export const HOMEBREW_CELLAR: string;
 	export const SECURITYSESSIONID: string;
+	export const CLAUDECODE: string;
+	export const __MISE_ZSH_PRECMD_RUN: string;
 	export const npm_node_execpath: string;
 	export const npm_config_prefix: string;
 	export const COLORTERM: string;
+	export const _: string;
 	export const NODE_ENV: string;
 }
 
@@ -140,11 +142,11 @@ declare module '$env/static/public' {
 declare module '$env/dynamic/private' {
 	export const env: {
 		MANPATH: string;
-		_VOLTA_TOOL_RECURSION: string;
+		__MISE_DIFF: string;
 		GHOSTTY_RESOURCES_DIR: string;
 		NoDefaultCurrentDirectoryInExePath: string;
-		CLAUDE_CODE_ENTRYPOINT: string;
 		TERM_PROGRAM: string;
+		CLAUDE_CODE_ENTRYPOINT: string;
 		NODE: string;
 		INIT_CWD: string;
 		SHELL: string;
@@ -154,13 +156,12 @@ declare module '$env/dynamic/private' {
 		npm_config_global_prefix: string;
 		CCC_DEFAULT_TOKEN: string;
 		TERM_PROGRAM_VERSION: string;
-		VOLTA_HOME: string;
 		ZPFX: string;
 		COLOR: string;
 		npm_config_noproxy: string;
 		npm_config_local_prefix: string;
-		GIT_EDITOR: string;
 		PMSPEC: string;
+		GIT_EDITOR: string;
 		USER: string;
 		COMMAND_MODE: string;
 		npm_config_globalconfig: string;
@@ -169,13 +170,12 @@ declare module '$env/dynamic/private' {
 		__CF_USER_TEXT_ENCODING: string;
 		npm_execpath: string;
 		FZF_DEFAULT_OPTS: string;
-		CCC_GLM_TOKEN: string;
 		CCC_KIMI_TOKEN: string;
+		CCC_GLM_TOKEN: string;
 		PATH: string;
 		npm_package_json: string;
-		_: string;
-		GHOSTTY_SHELL_FEATURES: string;
 		LaunchInstanceID: string;
+		GHOSTTY_SHELL_FEATURES: string;
 		npm_config_userconfig: string;
 		npm_config_init_module: string;
 		__CFBundleIdentifier: string;
@@ -198,11 +198,12 @@ declare module '$env/dynamic/private' {
 		HOME: string;
 		SHLVL: string;
 		ANTHROPIC_BASE_URL: string;
+		__MISE_ORIG_PATH: string;
 		TERMINFO: string;
-		npm_config_loglevel: string;
-		HOMEBREW_PREFIX: string;
 		ZSH_CACHE_DIR: string;
+		HOMEBREW_PREFIX: string;
 		HTTP_PROXY: string;
+		MISE_SHELL: string;
 		CRS_OAI_KEY: string;
 		PROMPT: string;
 		npm_config_cache: string;
@@ -211,17 +212,20 @@ declare module '$env/dynamic/private' {
 		npm_lifecycle_script: string;
 		FZF_CTRL_T_OPTS: string;
 		XDG_DATA_DIRS: string;
-		COREPACK_ENABLE_AUTO_PIN: string;
 		GHOSTTY_BIN_DIR: string;
+		COREPACK_ENABLE_AUTO_PIN: string;
 		npm_config_user_agent: string;
 		CCC_BACKUP_TOKEN: string;
-		HOMEBREW_CELLAR: string;
+		__MISE_SESSION: string;
 		INFOPATH: string;
-		CLAUDECODE: string;
+		HOMEBREW_CELLAR: string;
 		SECURITYSESSIONID: string;
+		CLAUDECODE: string;
+		__MISE_ZSH_PRECMD_RUN: string;
 		npm_node_execpath: string;
 		npm_config_prefix: string;
 		COLORTERM: string;
+		_: string;
 		NODE_ENV: string;
 		[key: `PUBLIC_${string}`]: undefined;
 		[key: `${string}`]: string | undefined;

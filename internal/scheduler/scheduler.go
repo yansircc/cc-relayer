@@ -39,7 +39,18 @@ func (s *Scheduler) Select(ctx context.Context, opts SelectOptions) (*account.Ac
 		}
 		// Bound account unavailable — don't fall through, return error
 		if acct != nil {
-			return nil, fmt.Errorf("bound account %s is %s", opts.BoundAccountID, acct.Status)
+			reason := fmt.Sprintf("bound account %s unavailable (status=%s", opts.BoundAccountID, acct.Status)
+			if !acct.Schedulable {
+				reason += ", unschedulable"
+			}
+			if acct.OverloadedUntil != nil {
+				reason += fmt.Sprintf(", overloaded until %s", acct.OverloadedUntil.Format(time.RFC3339))
+			}
+			if acct.ErrorMessage != "" {
+				reason += ": " + acct.ErrorMessage
+			}
+			reason += ")"
+			return nil, fmt.Errorf("%s", reason)
 		}
 	}
 

@@ -40,18 +40,25 @@ func (r *Relay) HandleCountTokens(w http.ResponseWriter, req *http.Request) {
 		IsOpusRequest:  isOpusModel(model),
 	})
 	if err != nil {
+		slog.Warn("count_tokens: account selection failed", "error", err)
 		writeError(w, http.StatusServiceUnavailable, "overloaded_error", "no available accounts")
 		return
 	}
 
 	accessToken, err := r.tokens.EnsureValidToken(ctx, acct.ID)
 	if err != nil {
+		slog.Warn("count_tokens: token unavailable", "error", err, "accountId", acct.ID)
 		writeError(w, http.StatusServiceUnavailable, "api_error", "token unavailable")
 		return
 	}
 
 	result := r.transformer.Transform(ctx, body, req.Header, acct)
-	upstreamBody, _ := json.Marshal(result.Body)
+	upstreamBody, err := json.Marshal(result.Body)
+	if err != nil {
+		slog.Error("count_tokens: marshal body failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "api_error", "failed to marshal request body")
+		return
+	}
 
 	upstreamURL, err := appendRawQuery(r.cfg.ClaudeAPIURL+"/count_tokens", req.URL.RawQuery)
 	if err != nil {
@@ -80,7 +87,12 @@ func (r *Relay) HandleCountTokens(w http.ResponseWriter, req *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("count_tokens: read response failed", "error", err)
+		writeError(w, http.StatusBadGateway, "api_error", "failed to read upstream response")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)

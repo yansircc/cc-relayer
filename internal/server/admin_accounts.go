@@ -107,7 +107,9 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 	// Parse stainless headers
 	var stainless map[string]interface{}
 	if hdrs, err := s.store.GetStainlessHeaders(r.Context(), id); err == nil && hdrs != "" {
-		json.Unmarshal([]byte(hdrs), &stainless)
+		if err := json.Unmarshal([]byte(hdrs), &stainless); err != nil {
+			slog.Warn("account detail: corrupt stainless headers", "error", err, "accountId", id)
+		}
 	}
 
 	// Session bindings for this account
