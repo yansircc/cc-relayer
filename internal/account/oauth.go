@@ -93,6 +93,7 @@ type ExchangeCodeResult struct {
 	AccessToken  string
 	RefreshToken string
 	ExpiresIn    int
+	CodexInfo    *CodexIDInfo // non-nil for Codex exchanges
 }
 
 // ExchangeCode exchanges an authorization code for tokens at the Anthropic token endpoint.

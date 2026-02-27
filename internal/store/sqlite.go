@@ -101,6 +101,11 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 		{"accounts", "five_hour_reset", "ALTER TABLE accounts ADD COLUMN five_hour_reset INTEGER NOT NULL DEFAULT 0"},
 		{"accounts", "seven_day_util", "ALTER TABLE accounts ADD COLUMN seven_day_util REAL NOT NULL DEFAULT 0"},
 		{"accounts", "seven_day_reset", "ALTER TABLE accounts ADD COLUMN seven_day_reset INTEGER NOT NULL DEFAULT 0"},
+		{"accounts", "provider", "ALTER TABLE accounts ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'"},
+		{"accounts", "codex_primary_util", "ALTER TABLE accounts ADD COLUMN codex_primary_util REAL NOT NULL DEFAULT 0"},
+		{"accounts", "codex_primary_reset", "ALTER TABLE accounts ADD COLUMN codex_primary_reset INTEGER NOT NULL DEFAULT 0"},
+		{"accounts", "codex_secondary_util", "ALTER TABLE accounts ADD COLUMN codex_secondary_util REAL NOT NULL DEFAULT 0"},
+		{"accounts", "codex_secondary_reset", "ALTER TABLE accounts ADD COLUMN codex_secondary_reset INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, m := range migrations {
 		if !s.columnExists(ctx, m.table, m.column) {
@@ -170,6 +175,11 @@ var fieldMap = map[string]colInfo{
 	"fiveHourReset":       {"five_hour_reset", sqlInt64},
 	"sevenDayUtil":        {"seven_day_util", sqlFloat},
 	"sevenDayReset":       {"seven_day_reset", sqlInt64},
+	"provider":            {"provider", sqlStr},
+	"codexPrimaryUtil":    {"codex_primary_util", sqlFloat},
+	"codexPrimaryReset":   {"codex_primary_reset", sqlInt64},
+	"codexSecondaryUtil":  {"codex_secondary_util", sqlFloat},
+	"codexSecondaryReset": {"codex_secondary_reset", sqlInt64},
 }
 
 func sqlStr(s string) interface{}  { return s }

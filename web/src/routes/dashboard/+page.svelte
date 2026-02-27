@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
-	import { fmtNum, fmtCost, timeAgo, tagClass, remainClass, remainTime, eventTypeColor } from '$lib/format';
+	import { fmtNum, fmtCost, timeAgo, tagClass, remainClass, remainTime, eventTypeColor, dotClass } from '$lib/format';
 	import CooldownCell from '$lib/components/CooldownCell.svelte';
 
 	interface UsagePeriod {
@@ -16,6 +16,7 @@
 	interface AccountView {
 		id: string;
 		email: string;
+		provider: string;
 		status: string;
 		priority_mode: string;
 		priority: number;
@@ -132,6 +133,13 @@ claude -p --model haiku \\
   "Print 'true' for testing purpose"`;
 	}
 
+	function buildCodexTestCmd(token: string): string {
+		const origin = typeof window !== 'undefined' ? window.location.origin : '';
+		return `OPENAI_BASE_URL="${origin}/openai" \\
+OPENAI_API_KEY="${token}" \\
+codex -p "Print 'true' for testing purpose"`;
+	}
+
 	async function copyCmd() {
 		if (!createdUser) return;
 		await navigator.clipboard.writeText(buildTestCmd(createdUser.token));
@@ -176,10 +184,12 @@ claude -p --model haiku \\
 		</tbody></table>
 	{/if}
 
-	<!-- Accounts -->
-	<h2>accounts <a href="{base}/add-account" class="add-link">[+ add]</a></h2>
-	{#if data.accounts.length === 0}
-		<p class="muted">no accounts</p>
+	<!-- Claude accounts -->
+	{@const claudeAccounts = data.accounts.filter(a => a.provider !== 'codex')}
+	{@const codexAccounts = data.accounts.filter(a => a.provider === 'codex')}
+	<h2>claude accounts <a href="{base}/add-account" class="add-link">[+ add]</a></h2>
+	{#if claudeAccounts.length === 0}
+		<p class="muted">no claude accounts</p>
 	{:else}
 		<table><thead>
 			<tr>
@@ -191,11 +201,40 @@ claude -p --model haiku \\
 				<th class="num">5h remain</th>
 				<th class="num">7d remain</th>
 			</tr></thead><tbody>
-			{#each data.accounts as a (a.id)}
+			{#each claudeAccounts as a (a.id)}
 				<tr>
 					<td><a href="{base}/accounts/{a.id}">{a.email}</a></td>
-					<td><span class={tagClass(a.status)}>{a.status}</span></td>
-					<td>{a.priority}{#if a.priority_mode === 'auto'} <span class="muted">(auto)</span>{/if}</td>
+					<td><span class={dotClass(a.status)}>{a.status}</span></td>
+					<td>{a.priority}{#if a.priority_mode === 'auto'} <span class="muted">(a)</span>{/if}</td>
+					<CooldownCell until={a.overloaded_until} />
+					<td>{timeAgo(a.last_used_at ?? '')}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.five_hour_reset, '5h')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.seven_day_util != null}{@const remain = 100 - a.seven_day_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.seven_day_reset, '7d')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+				</tr>
+			{/each}
+		</tbody></table>
+	{/if}
+
+	<!-- Codex accounts -->
+	<h2>codex accounts <a href="{base}/add-account" class="add-link">[+ add]</a></h2>
+	{#if codexAccounts.length === 0}
+		<p class="muted">no codex accounts</p>
+	{:else}
+		<table><thead>
+			<tr>
+				<th>email</th>
+				<th>status</th>
+				<th>pri</th>
+				<th>cooldown</th>
+				<th>last used</th>
+				<th class="num">primary</th>
+				<th class="num">secondary</th>
+			</tr></thead><tbody>
+			{#each codexAccounts as a (a.id)}
+				<tr>
+					<td><a href="{base}/accounts/{a.id}">{a.email}</a></td>
+					<td><span class={dotClass(a.status)}>{a.status}</span></td>
+					<td>{a.priority}{#if a.priority_mode === 'auto'} <span class="muted">(a)</span>{/if}</td>
 					<CooldownCell until={a.overloaded_until} />
 					<td>{timeAgo(a.last_used_at ?? '')}</td>
 					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.five_hour_reset, '5h')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
@@ -252,7 +291,7 @@ claude -p --model haiku \\
 			{#each data.users as u (u.id)}
 				<tr>
 					<td><a href="{base}/users/{u.id}">{u.name}</a></td>
-					<td><span class={tagClass(u.status)}>{u.status}</span></td>
+					<td><span class={dotClass(u.status)}>{u.status}</span></td>
 					<td>{timeAgo(u.last_active_at ?? '')}</td>
 					<td class="num {u.total_cost === 0 ? 'muted' : ''}">{fmtCost(u.total_cost)}</td>
 				</tr>

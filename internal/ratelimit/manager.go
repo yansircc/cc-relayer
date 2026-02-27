@@ -2,8 +2,10 @@ package ratelimit
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/yansir/cc-relayer/internal/store"
@@ -84,6 +86,39 @@ func (m *Manager) captureUtilization(ctx context.Context, accountID string, head
 func (m *Manager) MarkOpusRateLimited(ctx context.Context, accountID string, resetTime time.Time) {
 	_ = m.store.SetAccountField(ctx, accountID, "opusRateLimitEndAt", resetTime.Format(time.RFC3339))
 	slog.Info("account opus rate limited", "accountId", accountID, "until", resetTime)
+}
+
+// CaptureCodexHeaders processes rate limit headers from a Codex upstream response.
+func (m *Manager) CaptureCodexHeaders(ctx context.Context, accountID string, headers http.Header) {
+	fields := map[string]string{}
+
+	if v := headers.Get("x-codex-primary-used-percent"); v != "" {
+		// Header is 0-100, store as 0.0-1.0
+		if pct, err := parseFloat(v); err == nil {
+			fields["codexPrimaryUtil"] = fmt.Sprintf("%f", pct/100)
+		}
+	}
+	if v := headers.Get("x-codex-primary-reset-after-seconds"); v != "" {
+		if secs, err := parseInt(v); err == nil {
+			resetAt := time.Now().Unix() + int64(secs)
+			fields["codexPrimaryReset"] = fmt.Sprintf("%d", resetAt)
+		}
+	}
+	if v := headers.Get("x-codex-secondary-used-percent"); v != "" {
+		if pct, err := parseFloat(v); err == nil {
+			fields["codexSecondaryUtil"] = fmt.Sprintf("%f", pct/100)
+		}
+	}
+	if v := headers.Get("x-codex-secondary-reset-after-seconds"); v != "" {
+		if secs, err := parseInt(v); err == nil {
+			resetAt := time.Now().Unix() + int64(secs)
+			fields["codexSecondaryReset"] = fmt.Sprintf("%d", resetAt)
+		}
+	}
+
+	if len(fields) > 0 {
+		_ = m.store.SetAccountFields(ctx, accountID, fields)
+	}
 }
 
 // RunCleanup periodically checks for accounts that should be restored.
@@ -167,4 +202,12 @@ func (m *Manager) cleanup(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func parseFloat(s string) (float64, error) {
+	return strconv.ParseFloat(s, 64)
+}
+
+func parseInt(s string) (int, error) {
+	return strconv.Atoi(s)
 }

@@ -7,7 +7,7 @@ body {
 	background: #fff;
 }
 a { color: #0000cc; }
-a:visited { color: #551a8b; }
+a:visited { color: #0000cc; }
 h1 {
 	font-size: 15px;
 	font-weight: bold;
@@ -89,7 +89,7 @@ dd { margin-left: 180px; margin-bottom: 2px; }
 @media (prefers-color-scheme: dark) {
 	body { background: #1a1a1a; color: #ccc; }
 	a { color: #6b9bff; }
-	a:visited { color: #b48eff; }
+	a:visited { color: #6b9bff; }
 	h1 { border-bottom-color: #555; }
 	th { border-bottom-color: #555; }
 	tr:hover { background: #252525; }

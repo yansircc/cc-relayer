@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -141,8 +143,20 @@ func (tm *TokenManager) refresh(ctx context.Context, accountID string) (string, 
 	return resp.AccessToken, nil
 }
 
-// callOAuthRefresh sends the OAuth refresh request to Anthropic.
+// callOAuthRefresh sends the OAuth refresh request, dispatching by provider.
 func (tm *TokenManager) callOAuthRefresh(ctx context.Context, accountID, refreshToken string) (*tokenResponse, error) {
+	acct, err := tm.accounts.Get(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("get account: %w", err)
+	}
+
+	if acct != nil && acct.Provider == "codex" {
+		return tm.callCodexRefresh(ctx, accountID, refreshToken)
+	}
+	return tm.callClaudeRefresh(ctx, accountID, refreshToken)
+}
+
+func (tm *TokenManager) callClaudeRefresh(ctx context.Context, accountID, refreshToken string) (*tokenResponse, error) {
 	body, _ := json.Marshal(map[string]string{
 		"grant_type":    "refresh_token",
 		"refresh_token": refreshToken,
@@ -184,6 +198,48 @@ func (tm *TokenManager) callOAuthRefresh(ctx context.Context, accountID, refresh
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("oauth returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var tokenResp tokenResponse
+	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	if tokenResp.AccessToken == "" {
+		return nil, fmt.Errorf("empty access_token in response")
+	}
+
+	return &tokenResp, nil
+}
+
+func (tm *TokenManager) callCodexRefresh(ctx context.Context, accountID, refreshToken string) (*tokenResponse, error) {
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {codexOAuthClientID},
+		"scope":         {"openid profile email"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", codexOAuthTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := tm.client
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("codex oauth returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var tokenResp tokenResponse

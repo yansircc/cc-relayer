@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'claude',
     status TEXT NOT NULL DEFAULT 'created',
     schedulable INTEGER NOT NULL DEFAULT 1,
     priority INTEGER NOT NULL DEFAULT 50,
@@ -18,7 +19,11 @@ CREATE TABLE IF NOT EXISTS accounts (
     opus_rate_limit_end_at INTEGER,
     overloaded_at INTEGER,
     overloaded_until INTEGER,
-    rate_limited_at INTEGER
+    rate_limited_at INTEGER,
+    codex_primary_util REAL NOT NULL DEFAULT 0,
+    codex_primary_reset INTEGER NOT NULL DEFAULT 0,
+    codex_secondary_util REAL NOT NULL DEFAULT 0,
+    codex_secondary_reset INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS users (

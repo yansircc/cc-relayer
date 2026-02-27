@@ -36,6 +36,7 @@ type Server struct {
 	transformer  *identity.Transformer
 	rateLimit    *ratelimit.Manager
 	relay        *relay.Relay
+	codexRelay   *relay.CodexRelay
 	transportMgr *transport.Manager
 	bus          *events.Bus
 	httpServer   *http.Server
@@ -51,6 +52,7 @@ func New(cfg *config.Config, s store.Store, crypto *account.Crypto, tm *transpor
 	trans := identity.NewTransformer(s, cfg)
 	rl := ratelimit.NewManager(s)
 	r := relay.New(s, as, tokMgr, sched, trans, rl, cfg, tm)
+	cr := relay.NewCodexRelay(s, as, tokMgr, sched, rl, cfg, tm)
 
 	srv := &Server{
 		cfg:          cfg,
@@ -62,6 +64,7 @@ func New(cfg *config.Config, s store.Store, crypto *account.Crypto, tm *transpor
 		transformer:  trans,
 		rateLimit:    rl,
 		relay:        r,
+		codexRelay:   cr,
 		transportMgr: tm,
 		bus:          bus,
 		version:      version,
@@ -88,6 +91,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Relay endpoints (authenticated)
 	mux.Handle("POST /v1/messages", auth(http.HandlerFunc(s.relay.Handle)))
 	mux.Handle("POST /v1/messages/count_tokens", auth(http.HandlerFunc(s.relay.HandleCountTokens)))
+	mux.Handle("POST /openai/responses", auth(http.HandlerFunc(s.codexRelay.Handle)))
 
 	// Telemetry sink — intercept without authentication
 	mux.HandleFunc("POST /api/event_logging/batch", func(w http.ResponseWriter, r *http.Request) {

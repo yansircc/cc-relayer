@@ -2,6 +2,7 @@
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
 
+	let provider = $state<'claude' | 'codex'>('claude');
 	let generating = $state(false);
 	let exchanging = $state(false);
 	let sessionId = $state('');
@@ -15,7 +16,7 @@
 		generating = true;
 		genError = '';
 		try {
-			const data = await api<{ session_id: string; auth_url: string }>('/accounts/generate-auth-url', { method: 'POST' });
+			const data = await api<{ session_id: string; auth_url: string }>(`/accounts/generate-auth-url?provider=${provider}`, { method: 'POST' });
 			sessionId = data.session_id;
 			authUrl = data.auth_url;
 		} catch (e: any) {
@@ -44,9 +45,27 @@
 			exchanging = false;
 		}
 	}
+
+	function reset() {
+		sessionId = '';
+		authUrl = '';
+		callbackInput = '';
+		genError = '';
+		exchangeError = '';
+		result = null;
+	}
 </script>
 
 <h2>add account</h2>
+
+<div class="bar" style="margin-bottom:12px">
+	<label style="margin-right:12px">
+		<input type="radio" bind:group={provider} value="claude" onchange={reset} disabled={!!sessionId}> Claude
+	</label>
+	<label>
+		<input type="radio" bind:group={provider} value="codex" onchange={reset} disabled={!!sessionId}> Codex
+	</label>
+</div>
 
 <h2>authorize {#if sessionId}<span class="g">&#10003;</span>{/if}</h2>
 {#if !sessionId}
@@ -72,8 +91,8 @@
 	<h2>exchange code {#if result}<span class="g">&#10003;</span>{/if}</h2>
 	{#if !result}
 		<label for="callback-input">callback url or code</label>
-		<input id="callback-input" type="text" bind:value={callbackInput} placeholder="https://platform.claude.com/oauth/code/callback?code=...">
-		<p class="hint">email and org info are auto-fetched after token exchange.</p>
+		<input id="callback-input" type="text" bind:value={callbackInput} placeholder={provider === 'codex' ? 'http://localhost:1455/auth/callback?code=...' : 'https://platform.claude.com/oauth/code/callback?code=...'}>
+		<p class="hint">{provider === 'codex' ? 'account info is extracted from the id_token.' : 'email and org info are auto-fetched after token exchange.'}</p>
 		{#if exchangeError}
 			<p class="error-msg">{exchangeError}</p>
 		{/if}

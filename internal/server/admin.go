@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yansir/cc-relayer/internal/auth"
+	"github.com/yansir/cc-relayer/internal/scheduler"
 )
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	type accountView struct {
 		ID              string     `json:"id"`
 		Email           string     `json:"email"`
+		Provider        string     `json:"provider"`
 		Status          string     `json:"status"`
 		PriorityMode    string     `json:"priority_mode"`
 		Priority        int        `json:"priority"`
@@ -108,27 +110,50 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	acctViews := make([]accountView, 0, len(acctList))
 	for _, a := range acctList {
+		pri := a.Priority
+		if a.PriorityMode == "auto" {
+			pri = scheduler.AutoPriority(a)
+		}
 		av := accountView{
 			ID:              a.ID,
 			Email:           a.Email,
+			Provider:        a.Provider,
 			Status:          a.Status,
 			PriorityMode:    a.PriorityMode,
-			Priority:        a.Priority,
+			Priority:        pri,
 			OverloadedUntil: a.OverloadedUntil,
 			LastUsedAt:      a.LastUsedAt,
 		}
-		if a.FiveHourUtil > 0 || a.FiveHourReset > 0 {
-			pct := int(a.FiveHourUtil * 100)
-			av.FiveHourUtil = &pct
-			if a.FiveHourReset > 0 {
-				av.FiveHourReset = &a.FiveHourReset
+		if a.Provider == "codex" {
+			// Codex accounts use primary/secondary as 5h/7d equivalents
+			if a.CodexPrimaryUtil > 0 || a.CodexPrimaryReset > 0 {
+				pct := int(a.CodexPrimaryUtil * 100)
+				av.FiveHourUtil = &pct
+				if a.CodexPrimaryReset > 0 {
+					av.FiveHourReset = &a.CodexPrimaryReset
+				}
 			}
-		}
-		if a.SevenDayUtil > 0 || a.SevenDayReset > 0 {
-			pct := int(a.SevenDayUtil * 100)
-			av.SevenDayUtil = &pct
-			if a.SevenDayReset > 0 {
-				av.SevenDayReset = &a.SevenDayReset
+			if a.CodexSecondaryUtil > 0 || a.CodexSecondaryReset > 0 {
+				pct := int(a.CodexSecondaryUtil * 100)
+				av.SevenDayUtil = &pct
+				if a.CodexSecondaryReset > 0 {
+					av.SevenDayReset = &a.CodexSecondaryReset
+				}
+			}
+		} else {
+			if a.FiveHourUtil > 0 || a.FiveHourReset > 0 {
+				pct := int(a.FiveHourUtil * 100)
+				av.FiveHourUtil = &pct
+				if a.FiveHourReset > 0 {
+					av.FiveHourReset = &a.FiveHourReset
+				}
+			}
+			if a.SevenDayUtil > 0 || a.SevenDayReset > 0 {
+				pct := int(a.SevenDayUtil * 100)
+				av.SevenDayUtil = &pct
+				if a.SevenDayReset > 0 {
+					av.SevenDayReset = &a.SevenDayReset
+				}
 			}
 		}
 		acctViews = append(acctViews, av)

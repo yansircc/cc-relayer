@@ -12,11 +12,12 @@ import (
 
 const claudeSalt = "salt"
 
-// Account represents a Claude Official OAuth account.
+// Account represents an OAuth account (Claude or Codex).
 type Account struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
-	Status        string     `json:"status"` // active, created, error, disabled
+	Provider      string     `json:"provider"` // "claude" or "codex"
+	Status        string     `json:"status"`   // active, created, error, disabled
 	ErrorMessage  string     `json:"errorMessage,omitempty"`
 	Schedulable   bool       `json:"schedulable"`
 	Priority      int        `json:"priority"`
@@ -28,7 +29,7 @@ type Account struct {
 	// Proxy config (JSON stored)
 	Proxy *ProxyConfig `json:"proxy,omitempty"`
 
-	// Rate limit state
+	// Rate limit state (Claude)
 	FiveHourStatus     string     `json:"fiveHourStatus,omitempty"`
 	FiveHourUtil       float64    `json:"fiveHourUtil,omitempty"`
 	FiveHourReset      int64      `json:"fiveHourReset,omitempty"`
@@ -36,6 +37,12 @@ type Account struct {
 	SevenDayReset      int64      `json:"sevenDayReset,omitempty"`
 	OpusRateLimitEndAt *time.Time `json:"opusRateLimitEndAt,omitempty"`
 	OverloadedUntil    *time.Time `json:"overloadedUntil,omitempty"`
+
+	// Rate limit state (Codex)
+	CodexPrimaryUtil    float64 `json:"codexPrimaryUtil,omitempty"`
+	CodexPrimaryReset   int64   `json:"codexPrimaryReset,omitempty"`
+	CodexSecondaryUtil  float64 `json:"codexSecondaryUtil,omitempty"`
+	CodexSecondaryReset int64   `json:"codexSecondaryReset,omitempty"`
 
 	// Priority mode
 	PriorityMode string `json:"priorityMode,omitempty"` // "auto" or "manual"
@@ -63,7 +70,7 @@ func NewAccountStore(s store.Store, c *Crypto) *AccountStore {
 }
 
 // Create adds a new account. The refreshToken is encrypted before storage.
-func (as *AccountStore) Create(ctx context.Context, email, refreshToken string, proxy *ProxyConfig, priority int) (*Account, error) {
+func (as *AccountStore) Create(ctx context.Context, email, refreshToken string, proxy *ProxyConfig, priority int, provider string) (*Account, error) {
 	id := uuid.New().String()
 
 	encRefresh, err := as.crypto.Encrypt(refreshToken, claudeSalt)
@@ -71,10 +78,15 @@ func (as *AccountStore) Create(ctx context.Context, email, refreshToken string, 
 		return nil, err
 	}
 
+	if provider == "" {
+		provider = "claude"
+	}
+
 	now := time.Now().UTC()
 	fields := map[string]string{
 		"id":             id,
 		"email":          email,
+		"provider":       provider,
 		"refreshToken":   encRefresh,
 		"status":         "created",
 		"schedulable":    "true",
@@ -99,6 +111,7 @@ func (as *AccountStore) Create(ctx context.Context, email, refreshToken string, 
 	return &Account{
 		ID:          id,
 		Email:       email,
+		Provider:    provider,
 		Status:      "created",
 		Schedulable: true,
 		Priority:    priority,
@@ -209,9 +222,14 @@ func (as *AccountStore) fromMap(m map[string]string) *Account {
 	if priorityMode == "" {
 		priorityMode = "auto"
 	}
+	provider := m["provider"]
+	if provider == "" {
+		provider = "claude"
+	}
 	a := &Account{
 		ID:                  m["id"],
 		Email:               m["email"],
+		Provider:            provider,
 		Status:              m["status"],
 		ErrorMessage:        m["errorMessage"],
 		Schedulable:         m["schedulable"] == "true",
@@ -222,7 +240,11 @@ func (as *AccountStore) fromMap(m map[string]string) *Account {
 		FiveHourUtil:        atof(m["fiveHourUtil"]),
 		FiveHourReset:       atoi64(m["fiveHourReset"], 0),
 		SevenDayUtil:        atof(m["sevenDayUtil"]),
-		SevenDayReset:  atoi64(m["sevenDayReset"], 0),
+		SevenDayReset:       atoi64(m["sevenDayReset"], 0),
+		CodexPrimaryUtil:    atof(m["codexPrimaryUtil"]),
+		CodexPrimaryReset:   atoi64(m["codexPrimaryReset"], 0),
+		CodexSecondaryUtil:  atof(m["codexSecondaryUtil"]),
+		CodexSecondaryReset: atoi64(m["codexSecondaryReset"], 0),
 	}
 
 	if t, err := time.Parse(time.RFC3339, m["createdAt"]); err == nil {

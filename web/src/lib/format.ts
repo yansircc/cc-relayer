@@ -74,5 +74,18 @@ export function eventTypeColor(type: string): string {
 }
 
 export function shortModel(model: string): string {
-	return model.replace('claude-', '').replace(/-\d{8}$/, '');
+	return model
+		.replace('claude-', '')
+		.replace(/^gpt-/, '')
+		.replace(/-\d{8}$/, '');
+}
+
+export function dotClass(status: string): string {
+	switch (status) {
+		case 'active': return 'g';
+		case 'blocked': case 'error': return 'r';
+		case 'overloaded': return 'o';
+		case 'disabled': return 'muted';
+		default: return '';
+	}
 }

@@ -23,6 +23,10 @@ type Config struct {
 	ClaudeAPIVersion string
 	ClaudeBetaHeader string
 
+	// Codex API
+	CodexAPIURL        string
+	CodexRequestTimeout time.Duration
+
 	// Scheduling
 	SessionBindingTTL   time.Duration
 	TokenRefreshAdvance time.Duration
@@ -56,6 +60,9 @@ func Load() *Config {
 		ClaudeAPIURL:     envOr("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
 		ClaudeAPIVersion: envOr("CLAUDE_API_VERSION", "2023-06-01"),
 		ClaudeBetaHeader: envOr("CLAUDE_BETA_HEADER", "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"),
+
+		CodexAPIURL:         envOr("CODEX_API_URL", "https://chatgpt.com/backend-api/codex/responses"),
+		CodexRequestTimeout: envDuration("CODEX_REQUEST_TIMEOUT", 10*time.Minute),
 
 		SessionBindingTTL:   envDuration("SESSION_BINDING_TTL", 24*time.Hour),
 		TokenRefreshAdvance: envDuration("TOKEN_REFRESH_ADVANCE", 60*time.Second),

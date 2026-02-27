@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
-	import { timeAgo, fmtDate, tagClass } from '$lib/format';
+	import { timeAgo, fmtDate, dotClass } from '$lib/format';
 	import TokenCountdown from '$lib/components/TokenCountdown.svelte';
 	import PriorityEditor from '$lib/components/PriorityEditor.svelte';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
@@ -11,13 +11,14 @@
 	interface AccountDetail {
 		id: string;
 		email: string;
+		provider: string;
 		status: string;
 		priority: number;
 		priority_mode: string;
 		auto_score: number;
 		schedulable: boolean;
 		errorMessage: string;
-		extInfo: { email: string; orgUUID: string; orgName: string } | null;
+		extInfo: Record<string, string> | null;
 		createdAt: string;
 		lastUsedAt: string | null;
 		lastRefreshAt: string | null;
@@ -178,11 +179,11 @@
 {:else if loading}
 	<p class="loading">loading account...</p>
 {:else if acct}
-	<h2>{acct.email} <span class={tagClass(acct.status)}>{acct.status}</span></h2>
+	<h2>{acct.email} <span class="muted">{acct.provider}</span></h2>
 
 	<div class="actions">
 		<button class="link" onclick={testAccount} disabled={testing}>{testing ? '[testing...]' : '[test]'}</button>
-		<button class="link" onclick={forceRefresh}>[force refresh token]</button>
+		<button class="link" onclick={forceRefresh}>[refresh token]</button>
 		<button class="link {acct.status === 'disabled' ? 'g' : 'r'}" onclick={toggleStatus}>
 			[{acct.status === 'disabled' ? 'enable' : 'disable'}]
 		</button>
@@ -194,7 +195,7 @@
 	{#if testResult}
 		<div class="bar" style="margin-top:0">
 			{#if testResult.ok}
-				<span class="g">&#10003; ok</span> &mdash; haiku &mdash; {(testResult.latency_ms / 1000).toFixed(1)}s &mdash; <span class="muted">{testResult.time}</span>
+				<span class="g">&#10003; ok</span> &mdash; {acct.provider === 'codex' ? 'codex' : 'haiku'} &mdash; {(testResult.latency_ms / 1000).toFixed(1)}s &mdash; <span class="muted">{testResult.time}</span>
 			{:else}
 				<span class="r">&#10007; failed</span> &mdash; {testResult.error} &mdash; <span class="muted">{testResult.time}</span>
 			{/if}
@@ -205,6 +206,9 @@
 	<dl>
 		<dt>id</dt>
 		<dd class="muted">{acct.id}</dd>
+
+		<dt>status</dt>
+		<dd><span class={dotClass(acct.status)}>{acct.status}</span></dd>
 
 		<dt>email</dt>
 		<dd>
@@ -222,7 +226,11 @@
 		<dt>org</dt>
 		<dd>
 			{#if acct.extInfo}
-				{acct.extInfo.orgName} <span class="muted">(uuid: {acct.extInfo.orgUUID})</span>
+				{#if acct.provider === 'codex'}
+					{acct.extInfo.orgTitle || '-'} <span class="muted">(account: {acct.extInfo.chatgptAccountId || '-'})</span>
+				{:else}
+					{acct.extInfo.orgName} <span class="muted">(uuid: {acct.extInfo.orgUUID})</span>
+				{/if}
 			{:else}
 				<span class="muted">-</span>
 			{/if}
@@ -245,20 +253,11 @@
 
 	<h2>token</h2>
 	<dl>
-		<dt>access token expires</dt>
+		<dt>expires in</dt>
 		<dd><TokenCountdown expiresAt={acct.expiresAt} /></dd>
 
 		<dt>last refreshed</dt>
-		<dd>{#if acct.lastRefreshAt}{timeAgo(acct.lastRefreshAt)} ({new Date(acct.lastRefreshAt).toLocaleTimeString('en-GB', { hour12: false })}){:else}<span class="muted">-</span>{/if}</dd>
-
-		<dt>refresh status</dt>
-		<dd>
-			{#if acct.expiresAt > Date.now()}
-				<span class="g">ok</span>
-			{:else}
-				<span class="r">expired</span>
-			{/if}
-		</dd>
+		<dd>{#if acct.lastRefreshAt}{timeAgo(acct.lastRefreshAt)} <span class="muted">({new Date(acct.lastRefreshAt).toLocaleTimeString('en-GB', { hour12: false })})</span>{:else}<span class="muted">-</span>{/if}</dd>
 	</dl>
 
 	<h2>scheduling</h2>
@@ -266,7 +265,7 @@
 		<dt>schedulable</dt>
 		<dd class={acct.schedulable ? 'g' : 'r'}>{acct.schedulable ? 'yes' : 'no'}</dd>
 
-		<dt>overloaded until</dt>
+		<dt>cooldown</dt>
 		<dd>
 			{#if acct.overloadedUntil}
 				<span class="o">{countdownText(acct.overloadedUntil)}</span>
@@ -275,22 +274,36 @@
 			{/if}
 		</dd>
 
-		<dt>5h window</dt>
-		<dd><span class={fiveHourColor(acct.fiveHourStatus)}>{acct.fiveHourStatus || '-'}</span></dd>
+		{#if acct.provider !== 'codex'}
+			<dt>5h window</dt>
+			<dd><span class={fiveHourColor(acct.fiveHourStatus)}>{acct.fiveHourStatus || '-'}</span></dd>
 
-		<dt>opus rate limit</dt>
-		<dd>
-			{#if acct.opusRateLimitEndAt}
-				<span class="o">{countdownText(acct.opusRateLimitEndAt)}</span>
-			{:else}
-				<span class="muted">-</span>
-			{/if}
-		</dd>
+			<dt>5h remain</dt>
+			<dd><span class="muted">-</span></dd>
+
+			<dt>7d remain</dt>
+			<dd><span class="muted">-</span></dd>
+
+			<dt>opus rate limit</dt>
+			<dd>
+				{#if acct.opusRateLimitEndAt}
+					<span class="o">{countdownText(acct.opusRateLimitEndAt)}</span>
+				{:else}
+					<span class="muted">-</span>
+				{/if}
+			</dd>
+		{:else}
+			<dt>primary remain</dt>
+			<dd><span class="muted">-</span></dd>
+
+			<dt>secondary remain</dt>
+			<dd><span class="muted">-</span></dd>
+		{/if}
 
 		<dt>last used</dt>
-		<dd>{#if acct.lastUsedAt}{timeAgo(acct.lastUsedAt)} ({new Date(acct.lastUsedAt).toLocaleTimeString('en-GB', { hour12: false })}){:else}<span class="muted">-</span>{/if}</dd>
+		<dd>{#if acct.lastUsedAt}{timeAgo(acct.lastUsedAt)} <span class="muted">({new Date(acct.lastUsedAt).toLocaleTimeString('en-GB', { hour12: false })})</span>{:else}<span class="muted">-</span>{/if}</dd>
 
-		<dt>error message</dt>
+		<dt>error</dt>
 		<dd>
 			{#if acct.errorMessage}
 				<span class="r">{acct.errorMessage}</span>
@@ -300,6 +313,7 @@
 		</dd>
 	</dl>
 
+	{#if acct.provider !== 'codex'}
 	<h2>stainless fingerprint</h2>
 	{#if acct.stainless && Object.keys(acct.stainless).length > 0}
 		<dl>
@@ -310,6 +324,7 @@
 		</dl>
 	{:else}
 		<p class="muted">not captured yet</p>
+	{/if}
 	{/if}
 
 	<h2>bound sessions <span class="muted">({acct.sessions.length})</span></h2>

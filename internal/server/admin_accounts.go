@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/yansir/cc-relayer/internal/account"
 	"github.com/yansir/cc-relayer/internal/identity"
+	"github.com/yansir/cc-relayer/internal/scheduler"
 )
 
 // handleListAccounts returns all accounts (without tokens).
@@ -26,6 +28,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	type accountView struct {
 		ID                 string                 `json:"id"`
 		Email              string                 `json:"email"`
+		Provider           string                 `json:"provider"`
 		Status             string                 `json:"status"`
 		Priority           int                    `json:"priority"`
 		PriorityMode       string                 `json:"priority_mode"`
@@ -42,6 +45,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 		views = append(views, accountView{
 			ID:                 a.ID,
 			Email:              a.Email,
+			Provider:           a.Provider,
 			Status:             a.Status,
 			Priority:           a.Priority,
 			PriorityMode:       a.PriorityMode,
@@ -115,20 +119,16 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 	// Session bindings for this account
 	sessions, _ := s.store.ListSessionBindingsForAccount(r.Context(), id)
 
-	// Compute auto priority score from FiveHourStatus
+	// Compute auto priority score
 	var autoScore int
 	if acct.PriorityMode == "auto" {
-		switch acct.FiveHourStatus {
-		case "allowed_warning":
-			autoScore = 30
-		default:
-			autoScore = 100
-		}
+		autoScore = scheduler.AutoPriority(acct)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id":                 acct.ID,
 		"email":              acct.Email,
+		"provider":           acct.Provider,
 		"status":             acct.Status,
 		"priority":           acct.Priority,
 		"priority_mode":      acct.PriorityMode,
@@ -282,8 +282,8 @@ func (s *Server) handleRefreshAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("account token force refreshed", "id", id)
 
-	// Back-fill org UUID if missing — extract from API response header
-	if acct.ExtInfo == nil || acct.ExtInfo["orgUUID"] == nil || acct.ExtInfo["orgUUID"] == "" {
+	// Back-fill org UUID if missing (Claude accounts only)
+	if acct.Provider != "codex" && (acct.ExtInfo == nil || acct.ExtInfo["orgUUID"] == nil || acct.ExtInfo["orgUUID"] == "") {
 		orgUUID := s.fetchOrgUUIDViaAPI(r.Context(), acct, accessToken)
 		if orgUUID != "" {
 			extInfo := map[string]interface{}{
@@ -328,7 +328,12 @@ func (s *Server) handleTestAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build test request: minimal messages call
+	if acct.Provider == "codex" {
+		s.testCodexAccount(w, r, acct, accessToken)
+		return
+	}
+
+	// Claude test request
 	testBody := `{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`
 	testURL := s.cfg.ClaudeAPIURL
 	testReq, err := http.NewRequestWithContext(r.Context(), "POST", testURL, strings.NewReader(testBody))
@@ -373,6 +378,88 @@ func (s *Server) handleTestAccount(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) testCodexAccount(w http.ResponseWriter, r *http.Request, acct *account.Account, accessToken string) {
+	testBody := `{"model":"gpt-5-codex","stream":true,"store":false,"instructions":"Reply with only: ok","input":[{"role":"user","content":"test"}]}`
+	testReq, err := http.NewRequestWithContext(r.Context(), "POST", s.cfg.CodexAPIURL, strings.NewReader(testBody))
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":    false,
+			"error": "failed to create request",
+		})
+		return
+	}
+	testReq.Header.Set("Content-Type", "application/json")
+	testReq.Header.Set("Authorization", "Bearer "+accessToken)
+	testReq.Header.Set("Host", "chatgpt.com")
+	testReq.Header.Set("Accept", "text/event-stream")
+	if acct.ExtInfo != nil {
+		if accountID, ok := acct.ExtInfo["chatgptAccountId"].(string); ok && accountID != "" {
+			testReq.Header.Set("Chatgpt-Account-Id", accountID)
+		}
+	}
+
+	client := s.transportMgr.GetClient(acct)
+	start := time.Now()
+	resp, err := client.Do(testReq)
+	latencyMs := time.Since(start).Milliseconds()
+
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":         false,
+			"latency_ms": latencyMs,
+			"error":      err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":         false,
+			"latency_ms": latencyMs,
+			"error":      fmt.Sprintf("codex upstream returned %d: %s", resp.StatusCode, truncateStr(string(body), 200)),
+		})
+		return
+	}
+
+	// Stream started — read until first output delta event, then stop.
+	// This confirms the account works without consuming extra tokens.
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	gotOutput := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event: response.output_text.delta") {
+			gotOutput = true
+			break
+		}
+		// Detect actual error events (not "error":null in normal events)
+		if strings.HasPrefix(line, "data: ") && strings.Contains(line, `"error":{`) {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"ok":         false,
+				"latency_ms": time.Since(start).Milliseconds(),
+				"error":      "upstream error in stream",
+			})
+			return
+		}
+	}
+
+	latencyMs = time.Since(start).Milliseconds()
+	if gotOutput {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":         true,
+			"latency_ms": latencyMs,
+		})
+	} else {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":         false,
+			"latency_ms": latencyMs,
+			"error":      "stream ended without output",
+		})
+	}
+}
+
 // fetchOrgUUIDViaAPI makes a minimal API call and extracts the org UUID
 // from the Anthropic-Organization-Id response header.
 func (s *Server) fetchOrgUUIDViaAPI(ctx context.Context, acct *account.Account, accessToken string) string {
@@ -393,4 +480,11 @@ func (s *Server) fetchOrgUUIDViaAPI(ctx context.Context, acct *account.Account, 
 	io.ReadAll(resp.Body)
 
 	return resp.Header.Get("Anthropic-Organization-Id")
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

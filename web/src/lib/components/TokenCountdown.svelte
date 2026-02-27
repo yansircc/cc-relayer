@@ -11,10 +11,11 @@
 	let expired = $derived(diff <= 0);
 	let text = $derived.by(() => {
 		if (expired) return 'expired';
-		const secs = Math.floor(diff / 1000);
-		const mins = Math.floor(secs / 60);
-		const remSecs = secs % 60;
-		return `${mins}m ${String(remSecs).padStart(2, '0')}s remaining`;
+		const totalSecs = Math.floor(diff / 1000);
+		const hours = Math.floor(totalSecs / 3600);
+		const mins = Math.floor((totalSecs % 3600) / 60);
+		const secs = totalSecs % 60;
+		return `${hours}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
 	});
 	let cls = $derived.by(() => {
 		if (expired) return 'r';

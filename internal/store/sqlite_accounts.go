@@ -18,7 +18,8 @@ const accountCols = `id, email, status, schedulable, priority, priority_mode, er
 	last_used_at, last_refresh_at, proxy_json, ext_info_json,
 	five_hour_status,
 	opus_rate_limit_end_at, overloaded_at, overloaded_until, rate_limited_at,
-	five_hour_util, five_hour_reset, seven_day_util, seven_day_reset`
+	five_hour_util, five_hour_reset, seven_day_util, seven_day_reset,
+	provider, codex_primary_util, codex_primary_reset, codex_secondary_util, codex_secondary_reset`
 
 func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string, error) {
 	var (
@@ -33,6 +34,9 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		rlAt                                sql.NullInt64
 		fhUtil, sdUtil                      float64
 		fhReset, sdReset                    int64
+		provider                            string
+		cpUtil, csUtil                      float64
+		cpReset, csReset                    int64
 	)
 	err := scanner.Scan(
 		&id, &email, &status, &sched, &prio, &priMode, &errMsg,
@@ -41,6 +45,7 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		&fhStatus,
 		&opusEnd, &olAt, &olUntil, &rlAt,
 		&fhUtil, &fhReset, &sdUtil, &sdReset,
+		&provider, &cpUtil, &cpReset, &csUtil, &csReset,
 	)
 	if err != nil {
 		return nil, err
@@ -49,10 +54,14 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 	if priMode == "" {
 		priMode = "auto"
 	}
+	if provider == "" {
+		provider = "claude"
+	}
 
 	m := map[string]string{
 		"id":                  id,
 		"email":               email,
+		"provider":            provider,
 		"status":              status,
 		"schedulable":         boolStr(sched),
 		"priority":            strconv.Itoa(prio),
@@ -69,6 +78,10 @@ func scanAccountRow(scanner interface{ Scan(...any) error }) (map[string]string,
 		"fiveHourReset":       strconv.FormatInt(fhReset, 10),
 		"sevenDayUtil":        strconv.FormatFloat(sdUtil, 'f', -1, 64),
 		"sevenDayReset":       strconv.FormatInt(sdReset, 10),
+		"codexPrimaryUtil":    strconv.FormatFloat(cpUtil, 'f', -1, 64),
+		"codexPrimaryReset":   strconv.FormatInt(cpReset, 10),
+		"codexSecondaryUtil":  strconv.FormatFloat(csUtil, 'f', -1, 64),
+		"codexSecondaryReset": strconv.FormatInt(csReset, 10),
 	}
 	setTimeField(m, "lastUsedAt", lastUsedAt)
 	setTimeField(m, "lastRefreshAt", lastRefreshAt)
