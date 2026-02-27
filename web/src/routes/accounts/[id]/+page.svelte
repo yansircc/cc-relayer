@@ -54,10 +54,12 @@
 		if (!dateStr) return '-';
 		const diff = new Date(dateStr).getTime() - Date.now();
 		if (diff <= 0) return 'passed';
-		const mins = Math.floor(diff / 60000);
-		if (mins < 60) return `${mins}m`;
+		const totalSecs = Math.floor(diff / 1000);
+		const mins = Math.floor(totalSecs / 60);
+		const secs = totalSecs % 60;
+		if (mins < 60) return `${mins}m ${String(secs).padStart(2, '0')}s`;
 		const hours = Math.floor(mins / 60);
-		return `${hours}h ${mins % 60}m`;
+		return `${hours}h ${mins % 60}m ${String(secs).padStart(2, '0')}s`;
 	}
 
 	function ttlFromExpires(expiresAt: string): string {

@@ -57,11 +57,11 @@ export function remainClass(remain: number | null): string {
 export function remainTime(resetTs: number | null, window: '5h' | '7d'): string {
 	if (!resetTs) return '';
 	const diff = resetTs * 1000 - Date.now();
-	if (diff <= 0) return window === '5h' ? '0/5h' : '0/7d';
+	if (diff <= 0) return window === '5h' ? '0h' : '0d';
 	if (window === '5h') {
-		return (diff / 3600000).toFixed(1) + '/5h';
+		return (diff / 3600000).toFixed(1) + 'h';
 	}
-	return (diff / 86400000).toFixed(1) + '/7d';
+	return (diff / 86400000).toFixed(1) + 'd';
 }
 
 export function eventTypeColor(type: string): string {

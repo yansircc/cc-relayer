@@ -181,7 +181,6 @@ claude -p --model haiku \\
 	{#if data.accounts.length === 0}
 		<p class="muted">no accounts</p>
 	{:else}
-		{@const ref = data.accounts.find(a => a.status === 'active' && a.five_hour_util != null)}
 		<table><thead>
 			<tr>
 				<th>email</th>
@@ -189,18 +188,18 @@ claude -p --model haiku \\
 				<th>pri</th>
 				<th>cooldown</th>
 				<th>last used</th>
-				<th class="num">{ref ? remainTime(ref.five_hour_reset, '5h') : '5h'}</th>
-				<th class="num">{ref ? remainTime(ref.seven_day_reset, '7d') : '7d'}</th>
+				<th class="num">5h remain</th>
+				<th class="num">7d remain</th>
 			</tr></thead><tbody>
 			{#each data.accounts as a (a.id)}
 				<tr>
 					<td><a href="{base}/accounts/{a.id}">{a.email}</a></td>
 					<td><span class={tagClass(a.status)}>{a.status}</span></td>
-					<td class={a.priority_mode === 'auto' ? 'muted' : ''}>{a.priority_mode === 'auto' ? 'auto' : a.priority}</td>
+					<td>{a.priority}{#if a.priority_mode === 'auto'} <span class="muted">(auto)</span>{/if}</td>
 					<CooldownCell until={a.overloaded_until} />
 					<td>{timeAgo(a.last_used_at ?? '')}</td>
-					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
-					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.seven_day_util != null}{@const remain = 100 - a.seven_day_util}<span class={remainClass(remain)}>{remain}%</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.five_hour_reset, '5h')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.seven_day_util != null}{@const remain = 100 - a.seven_day_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.seven_day_reset, '7d')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
 				</tr>
 			{/each}
 		</tbody></table>
