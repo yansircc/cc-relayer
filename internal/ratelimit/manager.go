@@ -50,7 +50,9 @@ func (m *Manager) updateFiveHourStatus(ctx context.Context, accountID, status, f
 		// Use the 5h-reset header to compute overloadedUntil; fallback to now+5h.
 		resetTime := now.Add(5 * time.Hour)
 		if fiveHourReset != "" {
-			if parsed, err := time.Parse(time.RFC3339, fiveHourReset); err == nil {
+			if secs, err := strconv.ParseInt(fiveHourReset, 10, 64); err == nil && secs > 0 {
+				resetTime = time.Unix(secs, 0)
+			} else if parsed, err := time.Parse(time.RFC3339, fiveHourReset); err == nil {
 				resetTime = parsed
 			}
 		}
@@ -80,6 +82,10 @@ func (m *Manager) captureUtilization(ctx context.Context, accountID string, head
 	if len(fields) > 0 {
 		_ = m.store.SetAccountFields(ctx, accountID, fields)
 	}
+
+	// Proactive cooldown: if any window is nearly exhausted, set cooldown until reset
+	m.maybeCooldown(ctx, accountID, fields["fiveHourUtil"], fields["fiveHourReset"], "5h")
+	m.maybeCooldown(ctx, accountID, fields["sevenDayUtil"], fields["sevenDayReset"], "7d")
 }
 
 // MarkOpusRateLimited records Opus-specific rate limiting.
@@ -92,25 +98,31 @@ func (m *Manager) MarkOpusRateLimited(ctx context.Context, accountID string, res
 func (m *Manager) CaptureCodexHeaders(ctx context.Context, accountID string, headers http.Header) {
 	fields := map[string]string{}
 
+	var primaryUtil, secondaryUtil float64
+	var primaryResetSecs, secondaryResetSecs int
+
 	if v := headers.Get("x-codex-primary-used-percent"); v != "" {
-		// Header is 0-100, store as 0.0-1.0
 		if pct, err := parseFloat(v); err == nil {
-			fields["codexPrimaryUtil"] = fmt.Sprintf("%f", pct/100)
+			primaryUtil = pct / 100
+			fields["codexPrimaryUtil"] = fmt.Sprintf("%f", primaryUtil)
 		}
 	}
 	if v := headers.Get("x-codex-primary-reset-after-seconds"); v != "" {
 		if secs, err := parseInt(v); err == nil {
+			primaryResetSecs = secs
 			resetAt := time.Now().Unix() + int64(secs)
 			fields["codexPrimaryReset"] = fmt.Sprintf("%d", resetAt)
 		}
 	}
 	if v := headers.Get("x-codex-secondary-used-percent"); v != "" {
 		if pct, err := parseFloat(v); err == nil {
-			fields["codexSecondaryUtil"] = fmt.Sprintf("%f", pct/100)
+			secondaryUtil = pct / 100
+			fields["codexSecondaryUtil"] = fmt.Sprintf("%f", secondaryUtil)
 		}
 	}
 	if v := headers.Get("x-codex-secondary-reset-after-seconds"); v != "" {
 		if secs, err := parseInt(v); err == nil {
+			secondaryResetSecs = secs
 			resetAt := time.Now().Unix() + int64(secs)
 			fields["codexSecondaryReset"] = fmt.Sprintf("%d", resetAt)
 		}
@@ -118,6 +130,30 @@ func (m *Manager) CaptureCodexHeaders(ctx context.Context, accountID string, hea
 
 	if len(fields) > 0 {
 		_ = m.store.SetAccountFields(ctx, accountID, fields)
+	}
+
+	// Proactive cooldown: pick the longest reset among exhausted windows
+	var cooldownUntil time.Time
+	if primaryUtil >= 0.99 && primaryResetSecs > 0 {
+		t := time.Now().Add(time.Duration(primaryResetSecs) * time.Second)
+		if t.After(cooldownUntil) {
+			cooldownUntil = t
+		}
+	}
+	if secondaryUtil >= 0.99 && secondaryResetSecs > 0 {
+		t := time.Now().Add(time.Duration(secondaryResetSecs) * time.Second)
+		if t.After(cooldownUntil) {
+			cooldownUntil = t
+		}
+	}
+	if !cooldownUntil.IsZero() {
+		now := time.Now().UTC()
+		_ = m.store.SetAccountFields(ctx, accountID, map[string]string{
+			"schedulable":     "false",
+			"overloadedAt":    now.Format(time.RFC3339),
+			"overloadedUntil": cooldownUntil.UTC().Format(time.RFC3339),
+		})
+		slog.Warn("account rate limit exhausted", "accountId", accountID, "until", cooldownUntil)
 	}
 }
 
@@ -210,4 +246,31 @@ func parseFloat(s string) (float64, error) {
 
 func parseInt(s string) (int, error) {
 	return strconv.Atoi(s)
+}
+
+// maybeCooldown sets cooldown if utilization is nearly exhausted for a given window.
+// resetStr is a Unix timestamp (seconds) as a string.
+func (m *Manager) maybeCooldown(ctx context.Context, accountID, utilStr, resetStr, window string) {
+	if utilStr == "" || resetStr == "" {
+		return
+	}
+	util, err := parseFloat(utilStr)
+	if err != nil || util < 0.99 {
+		return
+	}
+	resetSecs, err := strconv.ParseInt(resetStr, 10, 64)
+	if err != nil || resetSecs <= 0 {
+		return
+	}
+	resetTime := time.Unix(resetSecs, 0)
+	if time.Now().After(resetTime) {
+		return
+	}
+	now := time.Now().UTC()
+	_ = m.store.SetAccountFields(ctx, accountID, map[string]string{
+		"schedulable":     "false",
+		"overloadedAt":    now.Format(time.RFC3339),
+		"overloadedUntil": resetTime.UTC().Format(time.RFC3339),
+	})
+	slog.Warn("account rate limit exhausted", "accountId", accountID, "window", window, "until", resetTime)
 }

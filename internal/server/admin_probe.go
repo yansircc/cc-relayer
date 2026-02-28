@@ -70,6 +70,12 @@ func (s *Server) refreshStaleAccounts(ctx context.Context) {
 		if acct.Status != "active" {
 			continue
 		}
+
+		// Check if account should be on cooldown based on existing data
+		if acct.Schedulable {
+			s.enforceExhaustedCooldown(ctx, acct, now)
+		}
+
 		// Stale = reset expired OR has utilization data but missing reset timestamp
 		stale := false
 		if acct.Provider == "codex" {
@@ -95,6 +101,7 @@ func (s *Server) refreshStaleAccounts(ctx context.Context) {
 
 			accessToken, err := s.tokens.EnsureValidToken(probeCtx, a.ID)
 			if err != nil {
+				slog.Warn("probe token failed", "account", a.Email, "error", err)
 				return
 			}
 
@@ -105,6 +112,7 @@ func (s *Server) refreshStaleAccounts(ctx context.Context) {
 				resp, err = s.doClaudeProbe(probeCtx, a, accessToken)
 			}
 			if err != nil {
+				slog.Warn("probe request failed", "account", a.Email, "error", err)
 				return
 			}
 
@@ -114,10 +122,42 @@ func (s *Server) refreshStaleAccounts(ctx context.Context) {
 				s.rateLimit.CaptureHeaders(probeCtx, a.ID, resp.Header)
 			}
 			resp.Body.Close()
-			slog.Debug("refreshed rate limits", "account", a.Email, "status", resp.StatusCode)
+			slog.Debug("probe refreshed", "account", a.Email, "status", resp.StatusCode)
 		}(acct)
 	}
 	wg.Wait()
+}
+
+// enforceExhaustedCooldown checks existing rate limit data and sets cooldown
+// for accounts that are exhausted but not yet on cooldown.
+func (s *Server) enforceExhaustedCooldown(ctx context.Context, acct *account.Account, now int64) {
+	var cooldownUntil int64
+
+	if acct.Provider == "codex" {
+		if acct.CodexPrimaryUtil >= 0.99 && acct.CodexPrimaryReset > now {
+			cooldownUntil = acct.CodexPrimaryReset
+		}
+		if acct.CodexSecondaryUtil >= 0.99 && acct.CodexSecondaryReset > now && acct.CodexSecondaryReset > cooldownUntil {
+			cooldownUntil = acct.CodexSecondaryReset
+		}
+	} else {
+		if acct.FiveHourUtil >= 0.99 && acct.FiveHourReset > now {
+			cooldownUntil = acct.FiveHourReset
+		}
+		if acct.SevenDayUtil >= 0.99 && acct.SevenDayReset > now && acct.SevenDayReset > cooldownUntil {
+			cooldownUntil = acct.SevenDayReset
+		}
+	}
+
+	if cooldownUntil > 0 {
+		resetTime := time.Unix(cooldownUntil, 0).UTC()
+		_ = s.store.SetAccountFields(ctx, acct.ID, map[string]string{
+			"schedulable":     "false",
+			"overloadedAt":    time.Now().UTC().Format(time.RFC3339),
+			"overloadedUntil": resetTime.Format(time.RFC3339),
+		})
+		slog.Warn("enforced cooldown on exhausted account", "account", acct.Email, "until", resetTime)
+	}
 }
 
 // fetchOrgUUIDViaAPI makes a minimal API call and extracts the org UUID
