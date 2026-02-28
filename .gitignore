@@ -11,9 +11,14 @@
 .DS_Store
 Thumbs.db
 
+# SvelteKit build cache
+web/.svelte-kit/
+
+# Claude Code
+.claude/HANDOFF.md
+.claude/worktrees/
+
 # Environment
 .env
 .env.*
 
-# Claude Code
-.claude/
