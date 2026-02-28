@@ -218,11 +218,12 @@ func (s *Server) exchangeCodexCode(w http.ResponseWriter, r *http.Request, code,
 	}
 	extInfoJSON, _ := json.Marshal(extInfo)
 
-	// Dedup: find existing codex account by chatgptAccountId
-	chatgptAccountID, _ := extInfo["chatgptAccountId"].(string)
+	// Dedup: find existing codex account by email (user-level unique).
+	// NOTE: chatgptAccountId is org-level, shared across users in the same
+	// ChatGPT workspace, so it cannot be used as a dedup key.
 	var existing *account.Account
-	if chatgptAccountID != "" {
-		existing, err = s.findAccountByExtInfoKey(r, "chatgptAccountId", chatgptAccountID)
+	if email != "" {
+		existing, err = s.findAccountByExtInfoKey(r, "email", email)
 		if err != nil {
 			slog.Error("list accounts failed", "error", err)
 		}
