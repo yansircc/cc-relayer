@@ -208,8 +208,8 @@ codex -p "Print 'true' for testing purpose"`;
 					<td>{a.priority}{#if a.priority_mode === 'auto'} <span class="muted">(a)</span>{/if}</td>
 					<CooldownCell until={a.overloaded_until} />
 					<td>{timeAgo(a.last_used_at ?? '')}</td>
-					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.five_hour_reset, '5h')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
-					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.seven_day_util != null}{@const remain = 100 - a.seven_day_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.seven_day_reset, '7d')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.five_hour_reset)}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.seven_day_util != null}{@const remain = 100 - a.seven_day_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.seven_day_reset)}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
 				</tr>
 			{/each}
 		</tbody></table>
@@ -237,8 +237,8 @@ codex -p "Print 'true' for testing purpose"`;
 					<td>{a.priority}{#if a.priority_mode === 'auto'} <span class="muted">(a)</span>{/if}</td>
 					<CooldownCell until={a.overloaded_until} />
 					<td>{timeAgo(a.last_used_at ?? '')}</td>
-					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.five_hour_reset, '5h')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
-					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.seven_day_util != null}{@const remain = 100 - a.seven_day_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.seven_day_reset, '7d')}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.five_hour_util != null}{@const remain = 100 - a.five_hour_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.five_hour_reset)}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
+					<td class="num">{#if a.status === 'blocked' || a.status === 'disabled'}<span class="muted">&ndash;</span>{:else if a.seven_day_util != null}{@const remain = 100 - a.seven_day_util}<span class={remainClass(remain)}>{remain}%</span> <span class="muted">{remainTime(a.seven_day_reset)}</span>{:else}<span class="muted">&ndash;</span>{/if}</td>
 				</tr>
 			{/each}
 		</tbody></table>

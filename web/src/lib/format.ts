@@ -54,14 +54,18 @@ export function remainClass(remain: number | null): string {
 	return 'r';
 }
 
-export function remainTime(resetTs: number | null, window: '5h' | '7d'): string {
+export function remainTime(resetTs: number | null): string {
 	if (!resetTs) return '';
-	const diff = resetTs * 1000 - Date.now();
-	if (diff <= 0) return window === '5h' ? '0h' : '0d';
-	if (window === '5h') {
-		return (diff / 3600000).toFixed(1) + 'h';
-	}
-	return (diff / 86400000).toFixed(1) + 'd';
+	const ms = resetTs * 1000 - Date.now();
+	if (ms <= 0) return '0s';
+	const sec = ms / 1000;
+	if (sec < 60) return Math.floor(sec) + 's';
+	const min = sec / 60;
+	if (min < 60) return Math.floor(min) + 'm';
+	const hr = min / 60;
+	if (hr < 24) return hr.toFixed(1).replace(/\.0$/, '') + 'h';
+	const day = hr / 24;
+	return day.toFixed(1).replace(/\.0$/, '') + 'd';
 }
 
 export function eventTypeColor(type: string): string {

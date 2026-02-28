@@ -2,7 +2,6 @@ package server
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -363,6 +362,8 @@ func (s *Server) handleTestAccount(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 	io.ReadAll(resp.Body) // drain
 
+	s.rateLimit.CaptureHeaders(r.Context(), acct.ID, resp.Header)
+
 	if resp.StatusCode != http.StatusOK {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"ok":         false,
@@ -413,6 +414,8 @@ func (s *Server) testCodexAccount(w http.ResponseWriter, r *http.Request, acct *
 	}
 	defer resp.Body.Close()
 
+	s.rateLimit.CaptureCodexHeaders(r.Context(), acct.ID, resp.Header)
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -458,28 +461,6 @@ func (s *Server) testCodexAccount(w http.ResponseWriter, r *http.Request, acct *
 			"error":      "stream ended without output",
 		})
 	}
-}
-
-// fetchOrgUUIDViaAPI makes a minimal API call and extracts the org UUID
-// from the Anthropic-Organization-Id response header.
-func (s *Server) fetchOrgUUIDViaAPI(ctx context.Context, acct *account.Account, accessToken string) string {
-	testBody := `{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`
-	req, err := http.NewRequestWithContext(ctx, "POST", s.cfg.ClaudeAPIURL, strings.NewReader(testBody))
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("Content-Type", "application/json")
-	identity.SetRequiredHeaders(req.Header, accessToken, s.cfg.ClaudeAPIVersion, s.cfg.ClaudeBetaHeader)
-
-	client := s.transportMgr.GetClient(acct)
-	resp, err := client.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
-
-	return resp.Header.Get("Anthropic-Organization-Id")
 }
 
 func truncateStr(s string, maxLen int) string {

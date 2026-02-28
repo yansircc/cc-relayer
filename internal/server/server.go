@@ -181,6 +181,7 @@ func (s *Server) Run() error {
 	go s.rateLimit.RunCleanup(ctx, 5*time.Minute)
 	go s.transportMgr.RunCleanup(ctx)
 	go s.runLogPurge(ctx)
+	go s.runRateLimitRefresh(ctx)
 
 	// Graceful shutdown
 	errCh := make(chan error, 1)
