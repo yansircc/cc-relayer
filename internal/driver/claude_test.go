@@ -37,6 +37,12 @@ func TestClaudeCalcCost(t *testing.T) {
 			want:  0.008775,
 		},
 		{
+			name:  "opus 5",
+			model: "claude-opus-5",
+			usage: &Usage{InputTokens: 1000, OutputTokens: 200, CacheReadTokens: 300, CacheCreateTokens: 400},
+			want:  0.01265,
+		},
+		{
 			name:  "fable",
 			model: "claude-fable-5",
 			usage: &Usage{InputTokens: 1000, OutputTokens: 200, CacheReadTokens: 300, CacheCreateTokens: 400},
@@ -65,18 +71,22 @@ func TestClaudeCalcCost(t *testing.T) {
 	}
 }
 
-func TestClaudeModelsIncludesOpus48(t *testing.T) {
+func TestClaudeModelsIncludeCurrentOpus(t *testing.T) {
 	d := NewClaudeDriver(ClaudeConfig{}, NoopStainlessStore{}, 4)
+	models := make(map[string]Model, len(d.Models()))
 	for _, model := range d.Models() {
-		if model.ID != "claude-opus-4-8" {
-			continue
+		models[model.ID] = model
+	}
+
+	for _, id := range []string{"claude-opus-4-8", "claude-opus-5"} {
+		model, ok := models[id]
+		if !ok {
+			t.Fatalf("%s missing from Claude model catalog", id)
 		}
 		if model.ContextWindow != 1000000 {
-			t.Fatalf("claude-opus-4-8 context_window = %d, want 1000000", model.ContextWindow)
+			t.Fatalf("%s context_window = %d, want 1000000", id, model.ContextWindow)
 		}
-		return
 	}
-	t.Fatal("claude-opus-4-8 missing from Claude model catalog")
 }
 
 func TestClaudeModelsIncludesFable5(t *testing.T) {

@@ -193,34 +193,47 @@ func TestCompatOpenAIChatToClaudeRequest_ModernEnvelopeAlias(t *testing.T) {
 	}
 }
 
-func TestCompatOpenAIChatToClaudeRequest_ModernEnvelopeForSonnet5(t *testing.T) {
-	temperature := 0.2
-	req := &compatOpenAIChatRequest{
-		Model:       "anthropic/claude-sonnet-5.0",
-		Temperature: &temperature,
-		Messages: []compatMessage{
-			{Role: "user", Content: json.RawMessage(`"hello"`)},
-		},
+func TestCompatOpenAIChatToClaudeRequest_ModernEnvelopeForGeneration5(t *testing.T) {
+	tests := []struct {
+		name      string
+		model     string
+		canonical string
+	}{
+		{name: "sonnet", model: "anthropic/claude-sonnet-5.0", canonical: "claude-sonnet-5"},
+		{name: "opus", model: "claude/claude-opus-5", canonical: "claude-opus-5"},
 	}
 
-	got, requestedModel, err := compatOpenAIChatToClaudeRequest(req)
-	if err != nil {
-		t.Fatalf("compatOpenAIChatToClaudeRequest() error = %v", err)
-	}
-	if requestedModel != "claude/claude-sonnet-5" {
-		t.Fatalf("requestedModel = %q", requestedModel)
-	}
-	if got.Model != "claude-sonnet-5" {
-		t.Fatalf("model = %q", got.Model)
-	}
-	if got.Temperature != nil {
-		t.Fatalf("temperature = %#v, want nil when thinking is enabled", got.Temperature)
-	}
-	if got.OutputConfig == nil || got.OutputConfig.Effort != "medium" {
-		t.Fatalf("output_config = %#v", got.OutputConfig)
-	}
-	if got.Thinking == nil || got.Thinking.Type != "adaptive" {
-		t.Fatalf("thinking = %#v", got.Thinking)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			temperature := 0.2
+			req := &compatOpenAIChatRequest{
+				Model:       tt.model,
+				Temperature: &temperature,
+				Messages: []compatMessage{
+					{Role: "user", Content: json.RawMessage(`"hello"`)},
+				},
+			}
+
+			got, requestedModel, err := compatOpenAIChatToClaudeRequest(req)
+			if err != nil {
+				t.Fatalf("compatOpenAIChatToClaudeRequest() error = %v", err)
+			}
+			if requestedModel != "claude/"+tt.canonical {
+				t.Fatalf("requestedModel = %q", requestedModel)
+			}
+			if got.Model != tt.canonical {
+				t.Fatalf("model = %q", got.Model)
+			}
+			if got.Temperature != nil {
+				t.Fatalf("temperature = %#v, want nil when thinking is enabled", got.Temperature)
+			}
+			if got.OutputConfig == nil || got.OutputConfig.Effort != "medium" {
+				t.Fatalf("output_config = %#v", got.OutputConfig)
+			}
+			if got.Thinking == nil || got.Thinking.Type != "adaptive" {
+				t.Fatalf("thinking = %#v", got.Thinking)
+			}
+		})
 	}
 }
 
@@ -504,6 +517,9 @@ func TestHandleCompatListModels(t *testing.T) {
 	}
 	if !ids["claude/claude-sonnet-5"] {
 		t.Fatalf("compat models missing sonnet 5 model: %#v", ids)
+	}
+	if !ids["claude/claude-opus-5"] {
+		t.Fatalf("compat models missing opus 5 model: %#v", ids)
 	}
 	if !ids["gemini/gemini-2.5-flash"] {
 		t.Fatalf("compat models missing gemini model: %#v", ids)

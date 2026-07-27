@@ -33,6 +33,7 @@ var (
 
 var claudeModelEntries = []claudeModelEntry{
 	{PublicID: "claude-fable-5", UpstreamID: "claude-fable-5", ContextWindow: 1000000, Advertise: true, CodeSystemEnvelope: true, Pricing: claudeFablePricing},
+	{PublicID: "claude-opus-5", UpstreamID: "claude-opus-5", ContextWindow: 1000000, Advertise: true, CodeSystemEnvelope: true, CompatModernEnvelope: true, Pricing: claudeOpusPricing},
 	{PublicID: "claude-opus-4-8", UpstreamID: "claude-opus-4-8", ContextWindow: 1000000, Advertise: true, CodeSystemEnvelope: true, Pricing: claudeOpusPricing},
 	{PublicID: "claude-opus-4-7", UpstreamID: "claude-opus-4-7", ContextWindow: 200000, Advertise: true, CodeSystemEnvelope: true, Pricing: claudeOpusPricing},
 	{PublicID: "claude-opus-4-6", UpstreamID: "claude-opus-4-6", ContextWindow: 200000, Advertise: true, CodeSystemEnvelope: true, CompatModernEnvelope: true, Pricing: claudeOpusPricing},
