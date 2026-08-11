@@ -3,9 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -23,12 +21,7 @@ func (d *ClaudeDriver) ExchangeCode(ctx context.Context, client *http.Client, co
 
 	orgUUID, email, orgName, err := fetchClaudeOrgWithToken(ctx, client, result.AccessToken)
 	if err != nil {
-		orgUUID = fetchOrgUUIDFromAPIHeader(ctx, client, d.cfg.APIURL, result.AccessToken, d.cfg.APIVersion, d.cfg.BetaHeader)
-		email = "account-" + time.Now().Format("0102-1504")
-	}
-
-	if orgUUID == "" {
-		return nil, fmt.Errorf("could not obtain organization UUID (subject)")
+		return nil, fmt.Errorf("obtain Claude account identity: %w", err)
 	}
 
 	return &ExchangeResult{
@@ -47,22 +40,4 @@ func (d *ClaudeDriver) ExchangeCode(ctx context.Context, client *http.Client, co
 
 func (d *ClaudeDriver) RefreshToken(ctx context.Context, client *http.Client, refreshToken string) (*TokenResponse, error) {
 	return refreshClaudeToken(ctx, client, refreshToken)
-}
-
-func fetchOrgUUIDFromAPIHeader(ctx context.Context, client *http.Client, apiURL, accessToken, apiVersion, betaHeader string) string {
-	body := `{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(body))
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("Content-Type", "application/json")
-	setClaudeRequiredHeaders(req.Header, accessToken, apiVersion, betaHeader)
-
-	resp, err := httpClientOrDefault(client, 15*time.Second).Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
-	return resp.Header.Get("Anthropic-Organization-Id")
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -15,16 +16,22 @@ const (
 	claudeOAuthClientID     = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	claudeOAuthTokenURL     = "https://platform.claude.com/v1/oauth/token"
 	claudeOAuthRedirectURI  = "https://platform.claude.com/oauth/code/callback"
-	claudeOAuthScope        = "org:create_api_key user:profile user:inference user:sessions:claude_code"
-	claudeOAuthAuthorizeURL = "https://platform.claude.com/oauth/authorize"
-	claudeAIBaseURL         = "https://platform.claude.com"
+	claudeOAuthAuthorizeURL = "https://claude.com/cai/oauth/authorize"
+	claudeOAuthProfileURL   = "https://api.anthropic.com/api/oauth/profile"
+
+	claudeOAuthAuthorizeScope = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+	claudeOAuthRefreshScope   = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 )
 
-type claudeOrgResponse struct {
-	UUID         string   `json:"uuid"`
-	Name         string   `json:"name"`
-	EmailAddress string   `json:"email_address"`
-	Capabilities []string `json:"capabilities"`
+type claudeOAuthProfile struct {
+	Account struct {
+		UUID  string `json:"uuid"`
+		Email string `json:"email"`
+	} `json:"account"`
+	Organization struct {
+		UUID string `json:"uuid"`
+		Name string `json:"name"`
+	} `json:"organization"`
 }
 
 func generateClaudeAuthURL() (string, OAuthSession, error) {
@@ -39,7 +46,7 @@ func generateClaudeAuthURL() (string, OAuthSession, error) {
 		"client_id":             {claudeOAuthClientID},
 		"response_type":         {"code"},
 		"redirect_uri":          {claudeOAuthRedirectURI},
-		"scope":                 {claudeOAuthScope},
+		"scope":                 {claudeOAuthAuthorizeScope},
 		"state":                 {state},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
@@ -65,11 +72,7 @@ func exchangeClaudeCode(ctx context.Context, client *http.Client, code, verifier
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "claude-cli/1.0.69 (external, cli)")
-	req.Header.Set("Referer", "https://claude.ai/")
-	req.Header.Set("Origin", "https://claude.ai")
+	setClaudeOAuthControlPlaneHeaders(req.Header)
 
 	client = httpClientOrDefault(client, 30*time.Second)
 	resp, err := client.Do(req)
@@ -93,61 +96,63 @@ func exchangeClaudeCode(ctx context.Context, client *http.Client, code, verifier
 	if tokenResp.AccessToken == "" {
 		return nil, fmt.Errorf("empty access_token in response")
 	}
+	if err := requireClaudeOAuthScopes(tokenResp.Scope, "user:profile", "user:inference"); err != nil {
+		return nil, fmt.Errorf("token exchange scope validation: %w", err)
+	}
 	return &tokenResp, nil
 }
 
-func fetchClaudeOrgWithToken(ctx context.Context, client *http.Client, accessToken string) (uuid, email, name string, err error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", claudeAIBaseURL+"/api/organizations", nil)
-	if err != nil {
-		return "", "", "", err
+func setClaudeOAuthControlPlaneHeaders(headers http.Header) {
+	headers.Set("Accept", "application/json, text/plain, */*")
+	headers.Set("Content-Type", "application/json")
+	headers.Set("User-Agent", "axios/1.15.2")
+}
+
+func requireClaudeOAuthScopes(granted string, required ...string) error {
+	grantedSet := make(map[string]struct{})
+	for _, scope := range strings.Fields(granted) {
+		grantedSet[scope] = struct{}{}
 	}
+	for _, scope := range required {
+		if _, ok := grantedSet[scope]; !ok {
+			return fmt.Errorf("granted scope missing %s", scope)
+		}
+	}
+	return nil
+}
+
+func fetchClaudeOrgWithToken(ctx context.Context, client *http.Client, accessToken string) (uuid, email, name string, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, claudeOAuthProfileURL, nil)
+	if err != nil {
+		return "", "", "", fmt.Errorf("create OAuth profile request: %w", err)
+	}
+	setClaudeOAuthControlPlaneHeaders(req.Header)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+	req.Header.Set("Cache-Control", "no-cache")
 
 	client = httpClientOrDefault(client, 15*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", fmt.Errorf("fetch OAuth profile: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", fmt.Errorf("read OAuth profile response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", "", fmt.Errorf("organizations API returned %d: %s", resp.StatusCode, truncateBytes(body, 200))
+		return "", "", "", fmt.Errorf("OAuth profile API returned %d: %s", resp.StatusCode, truncateBytes(body, 200))
 	}
 
-	var orgs []claudeOrgResponse
-	if err := json.Unmarshal(body, &orgs); err != nil {
-		return "", "", "", fmt.Errorf("parse organizations: %w", err)
+	var profile claudeOAuthProfile
+	if err := json.Unmarshal(body, &profile); err != nil {
+		return "", "", "", fmt.Errorf("parse OAuth profile response: %w", err)
 	}
-	if len(orgs) == 0 {
-		return "", "", "", fmt.Errorf("no organizations found")
+	if profile.Organization.UUID == "" {
+		return "", "", "", fmt.Errorf("OAuth profile response missing organization UUID")
 	}
-
-	best := -1
-	bestCaps := -1
-	for i, org := range orgs {
-		hasChat := false
-		for _, cap := range org.Capabilities {
-			if cap == "chat" {
-				hasChat = true
-				break
-			}
-		}
-		if hasChat && len(org.Capabilities) > bestCaps {
-			best = i
-			bestCaps = len(org.Capabilities)
-		}
-	}
-	if best == -1 {
-		best = 0
-	}
-
-	return orgs[best].UUID, orgs[best].EmailAddress, orgs[best].Name, nil
+	return profile.Organization.UUID, profile.Account.Email, profile.Organization.Name, nil
 }
 
 func refreshClaudeToken(ctx context.Context, client *http.Client, refreshToken string) (*TokenResponse, error) {
@@ -155,17 +160,14 @@ func refreshClaudeToken(ctx context.Context, client *http.Client, refreshToken s
 		"grant_type":    "refresh_token",
 		"refresh_token": refreshToken,
 		"client_id":     claudeOAuthClientID,
+		"scope":         claudeOAuthRefreshScope,
 	})
 
 	req, err := http.NewRequestWithContext(ctx, "POST", claudeOAuthTokenURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "claude-cli/1.0.69 (external, cli)")
-	req.Header.Set("Referer", "https://claude.ai/")
-	req.Header.Set("Origin", "https://claude.ai")
+	setClaudeOAuthControlPlaneHeaders(req.Header)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -187,6 +189,9 @@ func refreshClaudeToken(ctx context.Context, client *http.Client, refreshToken s
 	}
 	if tokenResp.AccessToken == "" {
 		return nil, fmt.Errorf("empty access_token in response")
+	}
+	if err := requireClaudeOAuthScopes(tokenResp.Scope, "user:inference"); err != nil {
+		return nil, fmt.Errorf("token refresh scope validation: %w", err)
 	}
 	return &tokenResp, nil
 }
