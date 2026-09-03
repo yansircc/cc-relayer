@@ -22,9 +22,14 @@
 		const full = `${base}${href}`;
 		return path === full || path.startsWith(full + '/');
 	}
+
+	function standalonePage() {
+		const path = $page.url.pathname;
+		return path === `${base}/login` || path === `${base}/status`;
+	}
 </script>
 
-{#if !$page.url.pathname.endsWith('/login')}
+{#if !standalonePage()}
 	<h1><a href="{base}/dashboard" style="text-decoration:none;color:inherit;">broker</a></h1>
 	<div class="topnav">
 		{#each navItems as item (item.href)}

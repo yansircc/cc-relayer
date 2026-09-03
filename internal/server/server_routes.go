@@ -82,6 +82,7 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 
 func (s *Server) registerOperationalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/event_logging/batch", s.handleTelemetryBatch)
+	mux.HandleFunc("GET /api/status", s.handlePublicStatus)
 	mux.HandleFunc("GET /health", s.handleHealthCheck)
 }
 

@@ -17,9 +17,6 @@ const staticPages = ['/'];
 async function run() {
   const browser = await chromium.launch();
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  await context.addCookies([
-    { name: 'cc_session', value: TOKEN, domain, path: '/' },
-  ]);
 
   const results = []; // { path, errors[] }
 
@@ -48,6 +45,17 @@ async function run() {
     results.push({ path, errors });
     return page;
   }
+
+  // The public status page must work before an admin cookie is installed.
+  const publicStatus = await visit('/status');
+  if (new URL(publicStatus.url()).pathname === '/login') {
+    results.at(-1).errors.push('public status redirected to login');
+  }
+  await publicStatus.close();
+
+  await context.addCookies([
+    { name: 'cc_session', value: TOKEN, domain, path: '/' },
+  ]);
 
   // 1. Visit dashboard and extract detail page links
   const dashboard = await visit('/dashboard');
