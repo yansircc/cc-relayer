@@ -18,6 +18,7 @@ type codexModelPricing struct {
 }
 
 var (
+	codexGPT6AstraPricing  = codexModelPricing{Input: 20, Output: 100, CacheRead: 2, CacheCreate: 25}
 	codexGPT56SolPricing   = codexModelPricing{Input: 10, Output: 60, CacheRead: 1.00, CacheCreate: 12.50}
 	codexGPT56TerraPricing = codexModelPricing{Input: 5, Output: 30, CacheRead: 0.50, CacheCreate: 6.25}
 	codexGPT56LunaPricing  = codexModelPricing{Input: 2, Output: 12, CacheRead: 0.20, CacheCreate: 2.50}
@@ -31,6 +32,7 @@ var codexModelEntries = []codexModelEntry{
 	{PublicID: "gpt-5.6-sol", ContextWindow: 1050000, Advertise: true, Pricing: codexGPT56SolPricing},
 	{PublicID: "gpt-5.6-terra", ContextWindow: 1050000, Advertise: true, Pricing: codexGPT56TerraPricing},
 	{PublicID: "gpt-5.6-luna", ContextWindow: 400000, Advertise: true, Pricing: codexGPT56LunaPricing},
+	{PublicID: "gpt-6-astra", ContextWindow: 1050000, Advertise: true, Pricing: codexGPT6AstraPricing},
 	{PublicID: "gpt-5.6", ContextWindow: 1050000, Advertise: false, Pricing: codexGPT56SolPricing},
 	{PublicID: "gpt-5.5", ContextWindow: 400000, Advertise: true, Pricing: codexGPT55Pricing},
 	{PublicID: "gpt-5.4", ContextWindow: 1050000, Advertise: true, Pricing: codexGPT54Pricing},

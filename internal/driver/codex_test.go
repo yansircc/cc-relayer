@@ -286,6 +286,24 @@ func TestCodexBuildRequestRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestCodexBuildRequestPassesGPT6AstraFields(t *testing.T) {
+	rawBody := `{"model":"gpt-6-astra","reasoning":{"effort":"max"},"service_tier":"fast","stream":true,"store":false}`
+	input := &RelayInput{RawBody: []byte(rawBody), Headers: make(http.Header)}
+	d := NewCodexDriver(CodexConfig{APIURL: "https://chatgpt.com/backend-api/codex"})
+
+	req, err := d.BuildRequest(context.Background(), input, &domain.Account{Subject: "acct-1"}, "tok")
+	if err != nil {
+		t.Fatalf("BuildRequest() error = %v", err)
+	}
+	gotBody, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read request body: %v", err)
+	}
+	if string(gotBody) != rawBody {
+		t.Fatalf("request body = %q, want exact %q", gotBody, rawBody)
+	}
+}
+
 func TestCodexProbeRequiresSubject(t *testing.T) {
 	d := NewCodexDriver(CodexConfig{APIURL: "https://chatgpt.com/backend-api/codex"})
 	acct := &domain.Account{Provider: domain.ProviderCodex}
@@ -552,6 +570,7 @@ func TestCodexModelFamily(t *testing.T) {
 		{"gpt-5.6-sol", ""},
 		{"gpt-5.6-terra", ""},
 		{"gpt-5.6-luna", ""},
+		{"gpt-6-astra", ""},
 		{"gpt-5.5", ""},
 		{"gpt-5.3-codex", ""},
 		{"gpt-5.4", ""},
@@ -593,6 +612,20 @@ func TestCodexModelsIncludesGPT56Family(t *testing.T) {
 			t.Fatalf("%s context_window = %d, want %d", id, got, contextWindow)
 		}
 	}
+}
+
+func TestCodexModelsIncludesGPT6Astra(t *testing.T) {
+	d := NewCodexDriver(CodexConfig{})
+	for _, model := range d.Models() {
+		if model.ID != "gpt-6-astra" {
+			continue
+		}
+		if model.ContextWindow != 1050000 {
+			t.Fatalf("gpt-6-astra context_window = %d, want %d", model.ContextWindow, 1050000)
+		}
+		return
+	}
+	t.Fatal("gpt-6-astra missing from codex model catalog")
 }
 
 func TestCodexModelsIncludesGPT55(t *testing.T) {
@@ -652,6 +685,14 @@ func TestCodexCalcCostGPT56Pricing(t *testing.T) {
 		if got := d.CalcCost(tt.model, usage); math.Abs(got-tt.want) > 1e-12 {
 			t.Fatalf("CalcCost(%q) = %.12f, want %.12f", tt.model, got, tt.want)
 		}
+	}
+}
+
+func TestCodexCalcCostGPT6AstraPricing(t *testing.T) {
+	d := NewCodexDriver(CodexConfig{})
+	usage := &Usage{InputTokens: 1000, OutputTokens: 10, CacheReadTokens: 300, CacheCreateTokens: 200}
+	if got, want := d.CalcCost("gpt-6-astra", usage), 0.0166; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("CalcCost(%q) = %.12f, want %.12f", "gpt-6-astra", got, want)
 	}
 }
 
